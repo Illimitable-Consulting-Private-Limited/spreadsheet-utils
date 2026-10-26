@@ -1,0 +1,67 @@
+{
+  "name": "spreadsheet-utils",
+  "version": "1.0.0",
+  "description": "Ultra-lightweight, low-memory universal spreadsheet reader supporting 16+ formats (XLSX, XLS, ODS, CSV, TSV, DBF, DIF, Lotus 1-2-3, SLK, HTML tables, XML Spreadsheet, Apple Numbers) with streaming SAX parsing, schema validation, and Jspreadsheet compatibility.",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./node": {
+      "types": "./index.d.ts",
+      "import": "./src/node.js",
+      "default": "./src/node.js"
+    },
+    "./browser": {
+      "types": "./index.d.ts",
+      "import": "./src/browser.js",
+      "default": "./src/browser.js"
+    },
+    "./web-worker": {
+      "types": "./index.d.ts",
+      "import": "./src/web-worker.js",
+      "default": "./src/web-worker.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "mocha \"src/**/*.test.js\" \"test/**/*.test.js\"",
+    "test:integration": "mocha test/integration/**/*.test.js",
+    "test:read-excel-file": "mocha test/read-excel-file/testCases.test.js",
+    "test:tabularjs": "mocha \"test/tabularjs/**/*.test.js\""
+  },
+  "keywords": [
+    "spreadsheet",
+    "excel",
+    "xlsx",
+    "xls",
+    "ods",
+    "csv",
+    "tsv",
+    "dbf",
+    "lotus",
+    "numbers",
+    "streaming",
+    "low-memory",
+    "read-excel-file",
+    "tabularjs",
+    "parser"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "saxen": "^11.2.0",
+    "unzipper-esm": "^0.13.3"
+  },
+  "devDependencies": {
+    "chai": "^6.3.0",
+    "mocha": "^12.0.3"
+  }
+}

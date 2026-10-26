@@ -1,0 +1,17 @@
+const createWorkerFunction = undefined
+
+import parseXml from '../xml/parseXml.js'
+import unpackXlsxFile from './unpackXlsxFileNode.js'
+
+import parseSpreadsheetContents from '../xlsx/parseSpreadsheetContents.js'
+
+/**
+ * Reads an `.xlsx` file.
+ * @param  {(string|Stream|Buffer|Blob)} input
+ * @param  {object} [options]
+ * @return {Promise<Sheet[]>}
+ */
+export default function readXlsxFile(input, options) {
+	return unpackXlsxFile(input)
+		.then((contents) => parseSpreadsheetContents(createWorkerFunction, parseXml, contents, options))
+}
