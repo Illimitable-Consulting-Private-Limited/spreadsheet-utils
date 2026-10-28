@@ -2498,45 +2498,93 @@ function unzipFromStream_(stream, onFile, onFileData, onFileDataEnd) {
   return new Promise((resolve, reject) => {
     const promises = [];
     let errored = false;
+    const unzipperStream = (0, import_unzipper_esm.Parse)();
     const onError = (error) => {
       if (error instanceof import_unzipper_esm.ZipFileError) {
         error = createUnzipError(error);
       }
       if (!errored) {
         errored = true;
+        try {
+          if (typeof unzipperStream.destroy === "function") {
+            unzipperStream.destroy(error);
+          }
+        } catch {
+        }
+        try {
+          if (typeof stream.destroy === "function") {
+            stream.destroy(error);
+          }
+        } catch {
+        }
         reject(error);
       }
     };
-    stream.on("error", onError).pipe((0, import_unzipper_esm.Parse)()).on("error", onError).on("finish", () => {
+    stream.on("error", onError).pipe(unzipperStream).on("error", (err) => {
+      if (!errored) onError(err);
+    }).on("finish", () => {
       if (!errored) {
         Promise.all(promises).then(() => {
           resolve(PROMISE_RESOLVE_VALUE);
         }, onError);
       }
     }).on("entry", (entry) => {
+      if (errored) {
+        if (typeof entry.autodrain === "function") {
+          entry.autodrain().on("error", () => {
+          });
+        }
+        return;
+      }
       let ignore = false;
       if (entry.type === "Directory") {
         ignore = true;
       }
-      if (errored) {
-        ignore = true;
-      }
       const uncompressedFileSizeIsKnown = !(entry.vars.flags & 8) || entry.vars.compressedSize > 0;
       const uncompressedFileSize = uncompressedFileSizeIsKnown ? entry.vars.uncompressedSize : void 0;
-      if (onFile(entry.path, uncompressedFileSize) === false) {
-        ignore = true;
+      try {
+        if (onFile(entry.path, uncompressedFileSize) === false) {
+          ignore = true;
+        }
+      } catch (err) {
+        onError(err);
+        return;
       }
       if (ignore) {
-        entry.autodrain().on("error", onError);
+        entry.autodrain().on("error", (err) => {
+          if (!errored) onError(err);
+        });
         return;
       }
       promises.push(new Promise((resolve2) => {
         entry.on("data", (data) => {
-          onFileData(entry.path, data);
+          if (errored) return;
+          try {
+            onFileData(entry.path, data);
+          } catch (err) {
+            try {
+              if (typeof entry.destroy === "function") {
+                entry.destroy(err);
+              } else if (typeof entry.autodrain === "function") {
+                entry.autodrain().on("error", () => {
+                });
+              }
+            } catch {
+            }
+            onError(err);
+            resolve2();
+          }
         }).on("error", (error) => {
-          onError(error);
+          if (!errored) onError(error);
+          resolve2();
         }).on("finish", () => {
-          onFileDataEnd(entry.path);
+          if (!errored) {
+            try {
+              onFileDataEnd(entry.path);
+            } catch (err) {
+              onError(err);
+            }
+          }
           resolve2();
         });
       }));

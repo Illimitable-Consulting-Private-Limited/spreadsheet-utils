@@ -29,95 +29,102 @@ export default function unzipFromStream_(stream, onFile, onFileData, onFileDataE
 
 		let errored = false
 
+		const unzipperStream = Parse()
+
 		const onError = (error) => {
 			if (error instanceof ZipFileError) {
 				error = createUnzipError(error)
 			}
 			if (!errored) {
 				errored = true
+				try {
+					if (typeof unzipperStream.destroy === 'function') {
+						unzipperStream.destroy(error)
+					}
+				} catch {}
+				try {
+					if (typeof stream.destroy === 'function') {
+						stream.destroy(error)
+					}
+				} catch {}
 				reject(error)
 			}
 		}
 
 		stream
-			// This first "error" listener catches errors emitted from the input stream (for example, a file read error).
-			//
-			// That's because the .pipe() method does not automatically propagate errors
-			// from a source (input) stream to the destination stream or the end of the pipeline.
-			// You would need to attach an 'error' event handler to each stream in the chain.
-			//
-			// A more convenient alternative would be to use `stream.pipeline()` function:
-			// `pipeline(stream1, stream2, (error) => { ... })`
-			//
 			.on('error', onError)
-			// Pipe the input stream through the unzipper stream.
-			.pipe(Parse())
-			// This second "error" listener catches the unzipper stream errors.
-			//
-			// That's because the .pipe() method does not automatically propagate errors
-			// from a source (input) stream to the destination stream or the end of the pipeline.
-			// You would need to attach an 'error' event handler to each stream in the chain.
-			//
-			// A more convenient alternative would be to use `stream.pipeline()` function:
-			// `pipeline(stream1, stream2, (error) => { ... })`
-			//
-			.on('error', onError)
-			// The unzipper stream is closed when all `entries` have been reported.
+			.pipe(unzipperStream)
+			.on('error', (err) => {
+				if (!errored) onError(err)
+			})
 			.on('finish', () => {
 				if (!errored) {
-					// Wait for all `entries` to be read.
-					// The second argument of `.then()` function is not required
-					// but I didn't remove it just to potentially prevent any potential silly bugs
-					// in case of some potential changes in some potential future.
 					Promise.all(promises).then(() => {
 						resolve(PROMISE_RESOLVE_VALUE)
 					}, onError)
 				}
 			})
 			.on('entry', (entry) => {
-				// See if this file should be ignored.
+				if (errored) {
+					if (typeof entry.autodrain === 'function') {
+						entry.autodrain().on('error', () => {})
+					}
+					return
+				}
+
 				let ignore = false
-				// `entry.type` could be 'Directory' or 'File'.
-				// Ignore anything except files.
 				if (entry.type === 'Directory') {
 					ignore = true
 				}
-				if (errored) {
-					ignore = true
-				}
-				// `entry.vars.uncompressedSize` will be `0` for `.zip` archives
-				// that were created in a streaming fashion.
-				// The `const fileSizeKnown = ...` code was copy-pasted from `node-unzipper` source code:
-				// https://github.com/ZJONSSON/node-unzipper/blob/master/lib/Open/unzip.js
+
 				const uncompressedFileSizeIsKnown = !(entry.vars.flags & 0x08) || entry.vars.compressedSize > 0
 				const uncompressedFileSize = uncompressedFileSizeIsKnown ? entry.vars.uncompressedSize : undefined
-				if (onFile(entry.path, uncompressedFileSize) === false) {
-					ignore = true
+				try {
+					if (onFile(entry.path, uncompressedFileSize) === false) {
+						ignore = true
+					}
+				} catch (err) {
+					onError(err)
+					return
 				}
 
-				// If this file should be ignored.
 				if (ignore) {
-					// Call `entry.autodrain()` when you do not intend to process a specific `entry`'s raw data.
-					// Otherwise, if an `entry` is not consumed (via .pipe(), .buffer(), or .autodrain()),
-					// the stream will halt, preventing further file processing.
-					entry.autodrain().on('error', onError)
+					entry.autodrain().on('error', (err) => {
+						if (!errored) onError(err)
+					})
 					return
 				}
 
 				promises.push(new Promise((resolve) => {
-					// `entry` seems to be a generic Node.js stream.
-					// `entry.pipe()` pipes the file contents to a stream.
-					// `entry.stream()` returns a readable stream.
-					// `entry.buffer()` returns a promise that resolves to a `Buffer` with the file contents.
 					entry
 						.on('data', (data) => {
-							onFileData(entry.path, data)
+							if (errored) return
+							try {
+								onFileData(entry.path, data)
+							} catch (err) {
+								try {
+									if (typeof entry.destroy === 'function') {
+										entry.destroy(err)
+									} else if (typeof entry.autodrain === 'function') {
+										entry.autodrain().on('error', () => {})
+									}
+								} catch {}
+								onError(err)
+								resolve()
+							}
 						})
 						.on('error', (error) => {
-							onError(error)
+							if (!errored) onError(error)
+							resolve()
 						})
 						.on('finish', () => {
-							onFileDataEnd(entry.path)
+							if (!errored) {
+								try {
+									onFileDataEnd(entry.path)
+								} catch (err) {
+									onError(err)
+								}
+							}
 							resolve()
 						})
 				}))

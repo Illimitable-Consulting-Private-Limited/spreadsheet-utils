@@ -154,8 +154,12 @@ export default function unzipFromStream_(stream, onFile, onFileData, onFileDataE
 
 			// `entry.originalSize` property will not be present for `.zip` archives
 			// that were created in a streaming fashion.
-			if (onFile(entry.name, entry.originalSize) === false) {
-				return
+			try {
+				if (onFile(entry.name, entry.originalSize) === false) {
+					return
+				}
+			} catch (err) {
+				return onError(err)
 			}
 
 			stillDecompressingEntriesCount++
@@ -166,20 +170,31 @@ export default function unzipFromStream_(stream, onFile, onFileData, onFileDataE
 				if (error) {
 					return onError(error)
 				}
-				// Sometimes, `chunk` is a `Buffer`. Other times, it's a `Uint8Array`.
-				// It's not really clear in which exact circumstances it's one or the other.
-				if (chunk instanceof Buffer) {
-					onFileData(entry.name, chunk)
-				} else if (chunk instanceof Uint8Array) {
-					onFileData(entry.name, Buffer.from(chunk))
-				} else {
-					// This error is not technically possible.
-					// In case it is thrown, it means that there's a bug in the code.
-					throw new Error('Unsupported type of chunk', chunk)
+				if (errored) {
+					return
+				}
+				try {
+					// Sometimes, `chunk` is a `Buffer`. Other times, it's a `Uint8Array`.
+					// It's not really clear in which exact circumstances it's one or the other.
+					if (chunk instanceof Buffer) {
+						onFileData(entry.name, chunk)
+					} else if (chunk instanceof Uint8Array) {
+						onFileData(entry.name, Buffer.from(chunk))
+					} else {
+						// This error is not technically possible.
+						// In case it is thrown, it means that there's a bug in the code.
+						throw new Error('Unsupported type of chunk', chunk)
+					}
+				} catch (err) {
+					return onError(err)
 				}
 				if (isLast) {
 					stillDecompressingEntriesCount--
-					onFileDataEnd(entry.name)
+					try {
+						onFileDataEnd(entry.name)
+					} catch (err) {
+						return onError(err)
+					}
 					resolveIfDone()
 				}
 			}
