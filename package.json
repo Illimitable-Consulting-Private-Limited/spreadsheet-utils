@@ -67,7 +67,7 @@
     "build": "node scripts/build.js",
     "pretest": "node scripts/build.js",
     "test": "mocha \"src/**/*.test.js\" \"test/**/*.test.js\"",
-    "test:integration": "mocha test/integration/**/*.test.js",
+    "test:integration": "mocha \"test/integration/**/*.test.js\"",
     "test:read-excel-file": "mocha test/read-excel-file/testCases.test.js",
     "test:tabularjs": "mocha \"test/tabularjs/**/*.test.js\"",
     "sync:check": "node scripts/sync-upstream.js --check",

@@ -128,8 +128,8 @@ async function build() {
     }
 
     console.log('\nBuild completed successfully! Artifacts generated in dist/:');
-    console.log('  dist/esm/:     index.mjs, plugins.mjs, write.mjs, full.mjs');
-    console.log('  dist/cjs/:     index.cjs, plugins.cjs, write.cjs, full.cjs');
+    console.log('  dist/esm/:     index.mjs, plugins.mjs, write.mjs, full.mjs, worker.mjs');
+    console.log('  dist/cjs/:     index.cjs, plugins.cjs, write.cjs, full.cjs, worker.cjs');
     console.log('  dist/browser/: spreadsheet-utils.min.js, spreadsheet-utils-plugins.min.js, spreadsheet-utils-write.min.js, spreadsheet-utils-full.min.js');
 }
 

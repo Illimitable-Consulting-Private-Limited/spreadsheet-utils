@@ -92,7 +92,7 @@ async function checkUpstream() {
 
     for (const [key, repo] of Object.entries(UPSTREAM_REPOSITORIES)) {
         process.stdout.write(`Fetching latest version for ${repo.npmPackage}... `);
-        const latest = run(`npm view ${repo.npmPackage} version`, { ignoreError: true });
+        const latest = run(`npm view ${repo.npmPackage} version`, { timeout: 8000, ignoreError: true });
         if (latest) {
             const isUpToDate = latest === repo.trackedVersion;
             console.log(`${latest} ${isUpToDate ? '(✓ up to date)' : `(⚠️ UPDATE AVAILABLE: tracked v${repo.trackedVersion} -> latest v${latest})`}`);
@@ -113,7 +113,7 @@ function verifyTests() {
         console.log('\n2. Executing full test suite...');
         run('npm test', { stdio: 'inherit' });
 
-        console.log('\n✓ All 465+ tests passed! Upstream integration is verified and stable.');
+        console.log('\n✓ All 576+ tests passed! Upstream integration is verified and stable.');
     } catch (err) {
         console.error('\n✗ Verification failed! See error output above.');
         process.exit(1);
