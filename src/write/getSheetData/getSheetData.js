@@ -5,11 +5,11 @@ export default function getSheetData(objects, columns) {
   // then a header row will be rendered.
   // Otherwise, there will be no header row.
   if (columns.some(function (column) {
-    return column.header;
+    return column.header !== undefined && column.header !== null && column.header !== false;
   })) {
     headerRow = columns.map(function (_ref) {
       var header = _ref.header;
-      return header || null;
+      return header !== undefined && header !== null && header !== false ? header : null;
     });
   }
   return (headerRow ? [headerRow] : []).concat(objects.map(function (object, objectIndex) {
@@ -19,4 +19,3 @@ export default function getSheetData(objects, columns) {
     });
   }));
 }
-//# sourceMappingURL=getSheetData.js.map

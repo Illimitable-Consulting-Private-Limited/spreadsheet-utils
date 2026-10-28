@@ -26,16 +26,33 @@ export interface CellData extends CellStyle {
 export type WriteRow = (CellData | any)[];
 export type WriteGrid = WriteRow[];
 
-export interface WriteColumn {
-    header?: string;
-    cell: (row: any, rowIndex?: number) => CellData | any;
+export interface HeaderCell extends CellStyle {
+    value: string;
+    [key: string]: any;
+}
+
+export interface WriteColumn extends CellStyle {
+    header?: string | HeaderCell;
+    column?: string;
+    name?: string;
+    prop?: string;
+    headerStyle?: CellStyle;
+    cell?: (row: any, rowIndex?: number) => CellData | any;
+    value?: (row: any, rowIndex?: number) => any;
+    style?: CellStyle | ((value: any, row: any, rowIndex?: number) => CellStyle);
     width?: number;
+    type?: any;
+    format?: string;
 }
 
 export interface WriteSheetOptions {
     sheet?: string;
     columns?: WriteColumn[];
-    schema?: Schema | any[];
+    schema?: Schema | any[] | Record<string, any>;
+    headerStyle?: CellStyle;
+    hasHeader?: boolean;
+    tableClass?: string;
+    fullDocument?: boolean;
     filePath?: string;
     fileName?: string;
     buffer?: boolean;
@@ -94,6 +111,7 @@ export function writeXlsxFile(
 export function writeCSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 export function writeTSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 export function writeHTML(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+export function createHTML(data: any, options?: WriteSheetOptions | string): string;
 export function writeJSON(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 export function writeDBF(data: any, options?: WriteSheetOptions | string): Promise<Uint8Array | Buffer | string | void>;
 export function createDBF(data: any, options?: WriteSheetOptions | string): Uint8Array;

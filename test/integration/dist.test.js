@@ -33,8 +33,13 @@ describe('Distribution Builds Verification', () => {
         });
 
         it('should load writer from dist/esm/write.mjs and generate XLSX buffer', async () => {
-            const { writeSpreadsheet } = await import('../../dist/esm/write.mjs');
+            const { writeSpreadsheet, createHTML } = await import('../../dist/esm/write.mjs');
             const { readSpreadsheet } = await import('../../dist/esm/index.mjs');
+
+            expect(createHTML).to.be.a('function');
+            const html = createHTML([['Header'], [{ value: 'Table Cell' }]]);
+            expect(html).to.include('<th>Header</th>');
+            expect(html).to.include('<td>Table Cell</td>');
 
             const buf = await writeSpreadsheet([[{ value: 'ESM Write', fontWeight: 'bold' }]], { buffer: true });
             expect(buf).to.be.an.instanceOf(Uint8Array);
@@ -93,8 +98,13 @@ describe('Distribution Builds Verification', () => {
         });
 
         it('should require writer from dist/cjs/write.cjs', async () => {
-            const { writeSpreadsheet } = require('../../dist/cjs/write.cjs');
+            const { writeSpreadsheet, createHTML } = require('../../dist/cjs/write.cjs');
             const { readSpreadsheet } = require('../../dist/cjs/index.cjs');
+
+            expect(createHTML).to.be.a('function');
+            const html = createHTML([['Header'], [{ value: 'CJS HTML' }]]);
+            expect(html).to.include('<th>Header</th>');
+            expect(html).to.include('<td>CJS HTML</td>');
 
             const buf = await writeSpreadsheet([[{ value: 'CJS Write' }]], { buffer: true });
             const rows = await readSpreadsheet(buf);

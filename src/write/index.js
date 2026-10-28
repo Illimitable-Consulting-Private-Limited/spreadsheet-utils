@@ -1,7 +1,7 @@
 import writeXlsxFileNode from './export/writeXlsxFileNode.js';
 import getSheetData from './getSheetData/getSheetData.js';
 import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
-import { writeCSV, writeTSV, writeHTML, writeJSON } from './formats.js';
+import { writeCSV, writeTSV, writeHTML, createHTML, writeJSON } from './formats.js';
 import { writeDBF, createDBF } from './dbf.js';
 import { writeODS, createODS } from './ods.js';
 import { writeXLS, createXLS } from './xls.js';
@@ -13,6 +13,7 @@ export {
     writeCSV,
     writeTSV,
     writeHTML,
+    createHTML,
     writeJSON,
     writeDBF,
     createDBF,
@@ -116,12 +117,12 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
     // Case 2: Object array with schema
     if (Array.isArray(inputData) && inputData.length > 0 && !Array.isArray(inputData[0])) {
         if (sheetOptions.schema) {
-            const columns = normalizeSchemaToColumns(sheetOptions.schema);
+            const columns = normalizeSchemaToColumns(sheetOptions.schema, sheetOptions);
             inputData = getSheetData(inputData, columns);
             sheetOptions.columns = columns;
             delete sheetOptions.schema;
         } else if (sheetOptions.columns && typeof sheetOptions.columns[0]?.cell !== 'function') {
-            const columns = normalizeSchemaToColumns(sheetOptions.columns);
+            const columns = normalizeSchemaToColumns(sheetOptions.columns, sheetOptions);
             inputData = getSheetData(inputData, columns);
             sheetOptions.columns = columns;
         }

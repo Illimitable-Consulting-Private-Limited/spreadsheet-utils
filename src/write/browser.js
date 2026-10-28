@@ -1,7 +1,7 @@
 import writeXlsxFileBrowser from './export/writeXlsxFileBrowser.js';
 import getSheetData from './getSheetData/getSheetData.js';
 import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
-import { normalizeTo2DArray, escapeCSVCell } from './formats.js';
+import { normalizeTo2DArray, escapeCSVCell, createHTML } from './formats.js';
 import { createDBF } from './dbf.js';
 import { createODS } from './ods.js';
 import { createXLS } from './xls.js';
@@ -52,77 +52,7 @@ export async function writeHTML(data, options = {}) {
         options = { fileName: options };
     }
 
-    let rows = [];
-    if (Array.isArray(data) && Array.isArray(data[0])) {
-        rows = data;
-    } else {
-        rows = normalizeTo2DArray(data);
-    }
-
-    const tableClass = options.tableClass || 'spreadsheet-table';
-    let html = `<table class="${tableClass}">\n`;
-    const coveredCells = new Set();
-
-    rows.forEach((row, rowIndex) => {
-        const isHeader = rowIndex === 0 && options.hasHeader !== false;
-        const tag = isHeader ? 'th' : 'td';
-        html += '  <tr>\n';
-        row.forEach((cell, colIndex) => {
-            const cellKey = `${rowIndex},${colIndex}`;
-            if (coveredCells.has(cellKey)) {
-                return;
-            }
-
-            let val = cell;
-            let style = '';
-            let spanAttrs = '';
-
-            if (cell && typeof cell === 'object') {
-                val = cell.value !== undefined ? cell.value : '';
-                const colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
-                const rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
-
-                if (colSpan > 1) spanAttrs += ` colspan="${colSpan}"`;
-                if (rowSpan > 1) spanAttrs += ` rowspan="${rowSpan}"`;
-
-                if (colSpan > 1 || rowSpan > 1) {
-                    for (let dr = 0; dr < rowSpan; dr++) {
-                        for (let dc = 0; dc < colSpan; dc++) {
-                            if (dr > 0 || dc > 0) {
-                                coveredCells.add(`${rowIndex + dr},${colIndex + dc}`);
-                            }
-                        }
-                    }
-                }
-
-                const styles = [];
-                if (cell.fontWeight) styles.push(`font-weight:${cell.fontWeight}`);
-                if (cell.fontStyle) styles.push(`font-style:${cell.fontStyle}`);
-                if (cell.backgroundColor) styles.push(`background-color:${cell.backgroundColor}`);
-                if (cell.textColor || cell.color) styles.push(`color:${cell.textColor || cell.color}`);
-                if (cell.align) styles.push(`text-align:${cell.align}`);
-                if (cell.borderStyle || cell.borderColor) {
-                    styles.push(`border:1px ${cell.borderStyle || 'solid'} ${cell.borderColor || '#ccc'}`);
-                }
-                if (styles.length > 0) {
-                    style = ` style="${styles.join(';')}"`;
-                }
-            }
-            if (val === null || val === undefined) val = '';
-            const safeVal = String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            html += `    <${tag}${spanAttrs}${style}>${safeVal}</${tag}>\n`;
-        });
-        html += '  </tr>\n';
-    });
-
-    html += '</table>';
-
-    if (options.fullDocument) {
-        html = `<!DOCTYPE html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>Spreadsheet Export</title>\n` +
-            `<style>\ntable.${tableClass} { border-collapse: collapse; width: 100%; font-family: sans-serif; }\n` +
-            `table.${tableClass} th, table.${tableClass} td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n` +
-            `table.${tableClass} th { background-color: #f4f4f4; font-weight: bold; }\n</style>\n</head>\n<body>\n${html}\n</body>\n</html>`;
-    }
+    const html = createHTML(data, options);
 
     if (options.fileName) {
         downloadFile(html, options.fileName, 'text/html;charset=utf-8;');
@@ -300,12 +230,12 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
 
     if (Array.isArray(inputData) && inputData.length > 0 && !Array.isArray(inputData[0])) {
         if (sheetOptions.schema) {
-            const columns = normalizeSchemaToColumns(sheetOptions.schema);
+            const columns = normalizeSchemaToColumns(sheetOptions.schema, sheetOptions);
             inputData = getSheetData(inputData, columns);
             sheetOptions.columns = columns;
             delete sheetOptions.schema;
         } else if (sheetOptions.columns && typeof sheetOptions.columns[0]?.cell !== 'function') {
-            const columns = normalizeSchemaToColumns(sheetOptions.columns);
+            const columns = normalizeSchemaToColumns(sheetOptions.columns, sheetOptions);
             inputData = getSheetData(inputData, columns);
             sheetOptions.columns = columns;
         }
@@ -324,6 +254,7 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
 export const writeXlsxFile = writeXlsxFileBrowser;
 export {
     writeCSV as writeCSVBrowser,
+    createHTML,
     getSheetData,
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,

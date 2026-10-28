@@ -37,6 +37,7 @@ export {
     writeCSV,
     writeTSV,
     writeHTML,
+    createHTML,
     writeJSON,
     writeDBF,
     createDBF,

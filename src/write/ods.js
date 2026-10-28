@@ -33,11 +33,12 @@ export function normalizeWorkbookSheets(data, options = {}) {
         sheets = data.worksheets.map((ws, i) => {
             const sheetName = ws.worksheetName || ws.sheet || ws.name || `Sheet${i + 1}`;
             let rows = ws.data || [];
+            let columns = ws.columns;
             if (ws.columns && Array.isArray(ws.columns) && rows.length > 0 && !Array.isArray(rows[0])) {
-                const cols = normalizeSchemaToColumns(ws.columns);
-                rows = getSheetData(rows, cols);
+                columns = normalizeSchemaToColumns(ws.columns, { ...options, ...ws });
+                rows = getSheetData(rows, columns);
             }
-            return { name: sheetName, rows };
+            return { name: sheetName, rows, columns };
         });
     }
     // Case 2: Multi-sheet array ([ { sheet: '...', data: [...] }, ... ])
@@ -46,26 +47,29 @@ export function normalizeWorkbookSheets(data, options = {}) {
             const sheetName = s.sheet || s.name || `Sheet${i + 1}`;
             let rows = s.data || [];
             const schema = s.schema || s.columns || options.schema;
+            let columns = s.columns;
             if (schema && rows.length > 0 && !Array.isArray(rows[0])) {
-                const cols = normalizeSchemaToColumns(schema);
-                rows = getSheetData(rows, cols);
+                columns = normalizeSchemaToColumns(schema, { ...options, ...s });
+                rows = getSheetData(rows, columns);
             }
-            return { name: sheetName, rows };
+            return { name: sheetName, rows, columns };
         });
     }
     // Case 3: Object array with schema
     else if (Array.isArray(data) && data.length > 0 && !Array.isArray(data[0])) {
         const schema = options.schema || options.columns;
         if (schema) {
-            const columns = normalizeSchemaToColumns(schema);
+            const columns = normalizeSchemaToColumns(schema, options);
             const grid = getSheetData(data, columns);
             sheets = [{
                 name: options.sheet || 'Sheet1',
-                rows: grid
+                rows: grid,
+                columns
             }];
         } else {
             const keys = Object.keys(data[0] || {});
-            const headerRow = keys.map(k => ({ value: k, fontWeight: 'bold' }));
+            const headerStyle = options.headerStyle || { fontWeight: 'bold' };
+            const headerRow = keys.map(k => ({ value: k, ...headerStyle }));
             const dataRows = data.map(obj => keys.map(k => ({ value: obj[k] })));
             sheets = [{
                 name: options.sheet || 'Sheet1',
@@ -77,7 +81,8 @@ export function normalizeWorkbookSheets(data, options = {}) {
     else if (Array.isArray(data)) {
         sheets = [{
             name: options.sheet || 'Sheet1',
-            rows: data
+            rows: data,
+            columns: options.columns
         }];
     }
     else {
@@ -258,6 +263,28 @@ function buildContentXml(sheets) {
     xml += `      <number:day number:style="long"/>\n`;
     xml += `    </number:date-style>\n`;
 
+    // Column styles for widths
+    const colStylesMap = new Map();
+    let nextColStyleId = 1;
+    for (const sheet of sheets) {
+        if (sheet.columns && Array.isArray(sheet.columns)) {
+            sheet.columns.forEach((col) => {
+                if (col && typeof col.width === 'number') {
+                    const widthCm = (col.width * 0.2).toFixed(2);
+                    if (!colStylesMap.has(widthCm)) {
+                        colStylesMap.set(widthCm, `co_${nextColStyleId++}`);
+                    }
+                }
+            });
+        }
+    }
+
+    for (const [widthCm, styleName] of colStylesMap.entries()) {
+        xml += `    <style:style style:name="${styleName}" style:family="table-column">\n`;
+        xml += `      <style:table-column-properties style:column-width="${widthCm}cm"/>\n`;
+        xml += `    </style:style>\n`;
+    }
+
     for (const { name, style } of stylesMap.values()) {
         xml += serializeOdsStyle(name, style);
     }
@@ -269,6 +296,18 @@ function buildContentXml(sheets) {
 
     for (const sheet of sheets) {
         xml += `      <table:table table:name="${escapeXml(sheet.name)}">\n`;
+
+        if (sheet.columns && Array.isArray(sheet.columns)) {
+            sheet.columns.forEach(col => {
+                if (col && typeof col.width === 'number') {
+                    const widthCm = (col.width * 0.2).toFixed(2);
+                    const styleName = colStylesMap.get(widthCm);
+                    xml += `        <table:table-column table:style-name="${styleName}"/>\n`;
+                } else {
+                    xml += `        <table:table-column/>\n`;
+                }
+            });
+        }
 
         const coveredCells = new Set();
 

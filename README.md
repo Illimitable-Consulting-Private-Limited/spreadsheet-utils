@@ -610,6 +610,108 @@ const odsUint8 = createODS(employees, { schema });
 
 ---
 
+## Universal Schema Styling & Cell Overrides
+
+`spreadsheet-utils` provides 100% API compatibility with `write-excel-file` across **XLSX**, **XLS**, **ODS**, and **HTML**. The exact same dataset and schema definition work across all formats.
+
+### 1. Header Styling (Object Syntax & `headerStyle`)
+
+Headers can be styled per-column using an object definition or globally using the `headerStyle` option:
+
+```javascript
+import { writeSpreadsheet, createHTML } from 'spreadsheet-utils/write';
+
+const employees = [
+  { id: 101, name: 'Alice Smith', dept: 'Engineering', salary: 120000, bonus: 15000 },
+  { id: 102, name: 'Bob Johnson', dept: 'Marketing', salary: 75000, bonus: -2000 }
+];
+
+const schema = [
+  // A. Header defined as an object with value and custom styles:
+  {
+    header: {
+      value: 'Employee ID',
+      fontWeight: 'bold',
+      backgroundColor: '#1F4E79', // Navy blue
+      color: '#FFFFFF',           // White text
+      align: 'center'
+    },
+    prop: 'id',
+    type: Number,
+    width: 15
+  },
+
+  // B. String header with headerStyle shorthand:
+  {
+    column: 'Full Name',
+    prop: 'name',
+    headerStyle: {
+      fontWeight: 'bold',
+      backgroundColor: '#2E75B6',
+      color: '#FFFFFF'
+    },
+    width: 25
+  },
+
+  // C. Dynamic cell overrides via cell(row, index) callback:
+  {
+    header: 'Performance Bonus',
+    cell: (row) => ({
+      value: row.bonus,
+      type: Number,
+      format: '$#,##0.00',
+      align: 'right',
+      // Conditional styling:
+      fontWeight: row.bonus > 5000 ? 'bold' : 'normal',
+      backgroundColor: row.bonus > 5000 ? '#D9EAD3' : (row.bonus < 0 ? '#FFC7CE' : undefined),
+      color: row.bonus > 5000 ? '#274E13' : (row.bonus < 0 ? '#9C0006' : undefined)
+    }),
+    width: 20
+  }
+];
+
+// Export to any format using the exact same schema:
+await writeSpreadsheet(employees, { schema, filePath: 'report.xlsx' }); // XLSX
+await writeSpreadsheet(employees, { schema, filePath: 'report.xls' });  // XLS (BIFF8)
+await writeSpreadsheet(employees, { schema, filePath: 'report.ods' });  // ODS
+await writeSpreadsheet(employees, { schema, filePath: 'report.html' }); // HTML table
+```
+
+### 2. Direct HTML String Generation (`createHTML`)
+
+For rendering HTML tables directly to strings (e.g., in server-side templates or web apps):
+
+```javascript
+import { createHTML } from 'spreadsheet-utils/write';
+
+// Generates an HTML <table> string with <thead>, <tbody>, inline CSS, and column widths:
+const htmlTable = createHTML(employees, { schema });
+
+// Wrap in complete standalone HTML5 document:
+const htmlDoc = createHTML(employees, { schema, fullDocument: true, title: 'Employee Report' });
+```
+
+### 3. Format Capabilities & Differences Matrix
+
+| Feature | XLSX (`write-excel-file`) | ODS (OpenDocument) | XLS (BIFF8 Binary) | HTML Table |
+| :--- | :---: | :---: | :---: | :---: |
+| **`header: { value, ...style }`** | Yes | Yes | Yes | Yes (`<th>`) |
+| **`headerStyle` option** | Yes | Yes | Yes | Yes |
+| **`cell: (row, idx) => Cell`** | Yes | Yes | Yes | Yes (`<td>`) |
+| **`fontWeight` & `fontStyle`** | Yes | Yes | Yes | Yes |
+| **`fontSize` & `fontFamily`** | Yes | Yes | Yes | Yes |
+| **`color` / `textColor`** | Yes (24-bit) | Yes (24-bit) | Yes (Palette-mapped) | Yes (CSS) |
+| **`backgroundColor`** | Yes (24-bit) | Yes (24-bit) | Yes (Palette-mapped) | Yes (CSS) |
+| **`borderColor` & `borderStyle`** | Yes | Yes | Yes | Yes |
+| **`align` & `verticalAlign`** | Yes | Yes | Yes | Yes |
+| **`columnSpan` & `rowSpan`** | Yes | Yes | Yes | Yes (`colspan`/`rowspan`) |
+| **Column `width`** | Yes | Yes | Yes (`BIFF.COLINFO`) | Yes (`<col style="...">`) |
+| **Formulas** | Yes (OpenXML) | Yes (OpenFormula) | Read-only | String |
+| **Embedded Images** | Yes (OpenXML) | No | No | No |
+| **OpenXML Conditional Formatting Rules** | Yes (`<dxfs>`) | Use `cell()` callback | Use `cell()` callback | Use `cell()` callback |
+
+---
+
 ## Browser `<script>` Tag Usage
 
 Standalone browser bundles are available in `dist/browser/`. Include them directly via `<script>` tag:
@@ -772,7 +874,7 @@ function writeSpreadsheet(
 
 ---
 
-### `writeCSV` / `writeTSV` / `writeHTML` / `writeJSON`
+### `writeCSV` / `writeTSV` / `writeHTML` / `createHTML` / `writeJSON`
 
 Dedicated format serializes:
 
@@ -780,6 +882,7 @@ Dedicated format serializes:
 function writeCSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 function writeTSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 function writeHTML(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+function createHTML(data: any, options?: WriteSheetOptions | string): string;
 function writeJSON(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 ```
 

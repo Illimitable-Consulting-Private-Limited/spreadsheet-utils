@@ -2586,11 +2586,11 @@ function getDefaultFont(globalOptions) {
 function getSheetData(objects, columns) {
   var headerRow;
   if (columns.some(function(column) {
-    return column.header;
+    return column.header !== void 0 && column.header !== null && column.header !== false;
   })) {
     headerRow = columns.map(function(_ref) {
       var header = _ref.header;
-      return header || null;
+      return header !== void 0 && header !== null && header !== false ? header : null;
     });
   }
   return (headerRow ? [headerRow] : []).concat(objects.map(function(object, objectIndex) {
@@ -3694,36 +3694,159 @@ async function writeDBF(data, options = {}) {
 }
 
 // src/write/schema.js
-function normalizeSchemaToColumns(schema) {
+var STYLE_PROPERTIES = [
+  "fontWeight",
+  "fontStyle",
+  "fontSize",
+  "fontFamily",
+  "color",
+  "textColor",
+  "backgroundColor",
+  "align",
+  "verticalAlign",
+  "wrap",
+  "borderColor",
+  "borderStyle",
+  "leftBorderStyle",
+  "rightBorderStyle",
+  "topBorderStyle",
+  "bottomBorderStyle",
+  "leftBorderColor",
+  "rightBorderColor",
+  "topBorderColor",
+  "bottomBorderColor",
+  "columnSpan",
+  "rowSpan",
+  "span"
+];
+function extractStyles(def) {
+  if (!def || typeof def !== "object") return {};
+  const styles = {};
+  for (const key of STYLE_PROPERTIES) {
+    if (def[key] !== void 0) {
+      styles[key] = def[key];
+    }
+  }
+  if (def.style && typeof def.style === "object") {
+    Object.assign(styles, def.style);
+  }
+  return styles;
+}
+function buildHeaderCell(colDef, fallbackName, options = {}) {
+  const rawHeader = colDef.header !== void 0 ? colDef.header : colDef.column !== void 0 ? colDef.column : colDef.name !== void 0 ? colDef.name : fallbackName;
+  const headerStyles = {
+    ...options.headerStyle || {},
+    ...colDef.headerStyle || {}
+  };
+  if (rawHeader && typeof rawHeader === "object" && !(rawHeader instanceof Date)) {
+    return {
+      value: rawHeader.value !== void 0 ? rawHeader.value : fallbackName,
+      ...headerStyles,
+      ...rawHeader
+    };
+  }
+  if (Object.keys(headerStyles).length > 0) {
+    return {
+      value: rawHeader !== void 0 && rawHeader !== null ? rawHeader : fallbackName,
+      ...headerStyles
+    };
+  }
+  return rawHeader !== void 0 && rawHeader !== null ? rawHeader : fallbackName;
+}
+function normalizeSchemaToColumns(schema, options = {}) {
   if (Array.isArray(schema)) {
-    return schema.map((col) => ({
-      header: col.column || col.header || col.name || "",
-      cell: (row, index) => {
-        const val = typeof col.value === "function" ? col.value(row, index) : col.prop ? row[col.prop] : col.column ? row[col.column] : col.name ? row[col.name] : null;
-        return {
-          value: val !== void 0 ? val : null,
-          type: col.type,
-          format: col.format,
-          ...col.style || {}
-        };
-      },
-      width: col.width
-    }));
+    return schema.map((col) => {
+      const baseStyles = extractStyles(col);
+      const header = buildHeaderCell(col, "", options);
+      return {
+        header,
+        cell: (row, index) => {
+          if (typeof col.cell === "function") {
+            const userCell = col.cell(row, index);
+            if (userCell && typeof userCell === "object" && !(userCell instanceof Date)) {
+              return {
+                type: col.type,
+                format: col.format,
+                ...baseStyles,
+                ...userCell
+              };
+            }
+            return {
+              value: userCell !== void 0 ? userCell : null,
+              type: col.type,
+              format: col.format,
+              ...baseStyles
+            };
+          }
+          const val = typeof col.value === "function" ? col.value(row, index) : col.prop ? row[col.prop] : col.column ? row[col.column] : col.name ? row[col.name] : null;
+          const dynamicStyles = typeof col.style === "function" ? col.style(val, row, index) : {};
+          if (val && typeof val === "object" && !(val instanceof Date) && "value" in val) {
+            return {
+              type: col.type,
+              format: col.format,
+              ...baseStyles,
+              ...dynamicStyles,
+              ...val
+            };
+          }
+          return {
+            value: val !== void 0 ? val : null,
+            type: col.type,
+            format: col.format,
+            ...baseStyles,
+            ...dynamicStyles
+          };
+        },
+        width: col.width
+      };
+    });
   }
   if (schema && typeof schema === "object") {
-    return Object.entries(schema).map(([propKey, colDef]) => ({
-      header: colDef.column || colDef.header || propKey,
-      cell: (row, index) => {
-        const val = typeof colDef.value === "function" ? colDef.value(row, index) : row[propKey];
-        return {
-          value: val !== void 0 ? val : null,
-          type: colDef.type,
-          format: colDef.format,
-          ...colDef.style || {}
-        };
-      },
-      width: colDef.width
-    }));
+    return Object.entries(schema).map(([propKey, colDef]) => {
+      const baseStyles = extractStyles(colDef);
+      const header = buildHeaderCell(colDef, propKey, options);
+      return {
+        header,
+        cell: (row, index) => {
+          if (typeof colDef.cell === "function") {
+            const userCell = colDef.cell(row, index);
+            if (userCell && typeof userCell === "object" && !(userCell instanceof Date)) {
+              return {
+                type: colDef.type,
+                format: colDef.format,
+                ...baseStyles,
+                ...userCell
+              };
+            }
+            return {
+              value: userCell !== void 0 ? userCell : null,
+              type: colDef.type,
+              format: colDef.format,
+              ...baseStyles
+            };
+          }
+          const val = typeof colDef.value === "function" ? colDef.value(row, index) : row ? row[propKey] : null;
+          const dynamicStyles = typeof colDef.style === "function" ? colDef.style(val, row, index) : {};
+          if (val && typeof val === "object" && !(val instanceof Date) && "value" in val) {
+            return {
+              type: colDef.type,
+              format: colDef.format,
+              ...baseStyles,
+              ...dynamicStyles,
+              ...val
+            };
+          }
+          return {
+            value: val !== void 0 ? val : null,
+            type: colDef.type,
+            format: colDef.format,
+            ...baseStyles,
+            ...dynamicStyles
+          };
+        },
+        width: colDef.width
+      };
+    });
   }
   return [];
 }
@@ -3744,35 +3867,39 @@ function normalizeWorkbookSheets(data, options = {}) {
     sheets = data.worksheets.map((ws, i) => {
       const sheetName = ws.worksheetName || ws.sheet || ws.name || `Sheet${i + 1}`;
       let rows = ws.data || [];
+      let columns = ws.columns;
       if (ws.columns && Array.isArray(ws.columns) && rows.length > 0 && !Array.isArray(rows[0])) {
-        const cols = normalizeSchemaToColumns(ws.columns);
-        rows = getSheetData(rows, cols);
+        columns = normalizeSchemaToColumns(ws.columns, { ...options, ...ws });
+        rows = getSheetData(rows, columns);
       }
-      return { name: sheetName, rows };
+      return { name: sheetName, rows, columns };
     });
   } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null && !Array.isArray(data[0]) && (data[0].sheet || data[0].data)) {
     sheets = data.map((s, i) => {
       const sheetName = s.sheet || s.name || `Sheet${i + 1}`;
       let rows = s.data || [];
       const schema = s.schema || s.columns || options.schema;
+      let columns = s.columns;
       if (schema && rows.length > 0 && !Array.isArray(rows[0])) {
-        const cols = normalizeSchemaToColumns(schema);
-        rows = getSheetData(rows, cols);
+        columns = normalizeSchemaToColumns(schema, { ...options, ...s });
+        rows = getSheetData(rows, columns);
       }
-      return { name: sheetName, rows };
+      return { name: sheetName, rows, columns };
     });
   } else if (Array.isArray(data) && data.length > 0 && !Array.isArray(data[0])) {
     const schema = options.schema || options.columns;
     if (schema) {
-      const columns = normalizeSchemaToColumns(schema);
+      const columns = normalizeSchemaToColumns(schema, options);
       const grid = getSheetData(data, columns);
       sheets = [{
         name: options.sheet || "Sheet1",
-        rows: grid
+        rows: grid,
+        columns
       }];
     } else {
       const keys = Object.keys(data[0] || {});
-      const headerRow = keys.map((k) => ({ value: k, fontWeight: "bold" }));
+      const headerStyle = options.headerStyle || { fontWeight: "bold" };
+      const headerRow = keys.map((k) => ({ value: k, ...headerStyle }));
       const dataRows = data.map((obj) => keys.map((k) => ({ value: obj[k] })));
       sheets = [{
         name: options.sheet || "Sheet1",
@@ -3782,7 +3909,8 @@ function normalizeWorkbookSheets(data, options = {}) {
   } else if (Array.isArray(data)) {
     sheets = [{
       name: options.sheet || "Sheet1",
-      rows: data
+      rows: data,
+      columns: options.columns
     }];
   } else {
     sheets = [{
@@ -3943,6 +4071,28 @@ function buildContentXml(sheets) {
 `;
   xml += `    </number:date-style>
 `;
+  const colStylesMap = /* @__PURE__ */ new Map();
+  let nextColStyleId = 1;
+  for (const sheet of sheets) {
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col) => {
+        if (col && typeof col.width === "number") {
+          const widthCm = (col.width * 0.2).toFixed(2);
+          if (!colStylesMap.has(widthCm)) {
+            colStylesMap.set(widthCm, `co_${nextColStyleId++}`);
+          }
+        }
+      });
+    }
+  }
+  for (const [widthCm, styleName] of colStylesMap.entries()) {
+    xml += `    <style:style style:name="${styleName}" style:family="table-column">
+`;
+    xml += `      <style:table-column-properties style:column-width="${widthCm}cm"/>
+`;
+    xml += `    </style:style>
+`;
+  }
   for (const { name, style } of stylesMap.values()) {
     xml += serializeOdsStyle(name, style);
   }
@@ -3955,6 +4105,19 @@ function buildContentXml(sheets) {
   for (const sheet of sheets) {
     xml += `      <table:table table:name="${escapeXml(sheet.name)}">
 `;
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col) => {
+        if (col && typeof col.width === "number") {
+          const widthCm = (col.width * 0.2).toFixed(2);
+          const styleName = colStylesMap.get(widthCm);
+          xml += `        <table:table-column table:style-name="${styleName}"/>
+`;
+        } else {
+          xml += `        <table:table-column/>
+`;
+        }
+      });
+    }
     const coveredCells = /* @__PURE__ */ new Set();
     for (let r = 0; r < sheet.rows.length; r++) {
       const row = sheet.rows[r];
@@ -4110,7 +4273,8 @@ var BIFF = {
   CODEPAGE: 66,
   WINDOW1: 61,
   WINDOW2: 574,
-  MERGECELLS: 229
+  MERGECELLS: 229,
+  COLINFO: 125
 };
 var PALETTE = [
   { idx: 8, r: 0, g: 0, b: 0 },
@@ -4542,6 +4706,21 @@ function createXLS(data, options = {}) {
     dimView.setUint16(8, 0, true);
     dimView.setUint16(10, Math.max(1, maxCol), true);
     sheetRecords.push(createRecord(BIFF.DIMENSIONS, dimData));
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col, cIdx) => {
+        if (col && typeof col.width === "number") {
+          const colInfoData = new Uint8Array(12);
+          const view = new DataView(colInfoData.buffer);
+          view.setUint16(0, cIdx, true);
+          view.setUint16(2, cIdx, true);
+          view.setUint16(4, Math.round(col.width * 256), true);
+          view.setUint16(6, 15, true);
+          view.setUint16(8, 0, true);
+          view.setUint16(10, 0, true);
+          sheetRecords.push(createRecord(BIFF.COLINFO, colInfoData));
+        }
+      });
+    }
     const win2Data = new Uint8Array(18);
     new DataView(win2Data.buffer).setUint16(0, 694, true);
     sheetRecords.push(createRecord(BIFF.WINDOW2, win2Data));
@@ -4729,33 +4908,120 @@ async function writeTSV(data, options = {}) {
   }
   return writeCSV(data, { ...options, delimiter: "	" });
 }
-async function writeHTML(data, options = {}) {
+function escapeHtml(str) {
+  if (str === null || str === void 0) return "";
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function formatCellStyles(cell) {
+  if (!cell || typeof cell !== "object" || cell instanceof Date) return "";
+  const styles = [];
+  if (cell.fontWeight) styles.push(`font-weight:${cell.fontWeight}`);
+  if (cell.fontStyle) styles.push(`font-style:${cell.fontStyle}`);
+  if (cell.fontSize) {
+    const sz = typeof cell.fontSize === "number" ? `${cell.fontSize}pt` : cell.fontSize;
+    styles.push(`font-size:${sz}`);
+  }
+  if (cell.fontFamily) styles.push(`font-family:${cell.fontFamily}`);
+  if (cell.backgroundColor) styles.push(`background-color:${cell.backgroundColor}`);
+  if (cell.textColor || cell.color) styles.push(`color:${cell.textColor || cell.color}`);
+  if (cell.align) styles.push(`text-align:${cell.align}`);
+  if (cell.verticalAlign) {
+    const va = cell.verticalAlign === "center" ? "middle" : cell.verticalAlign;
+    styles.push(`vertical-align:${va}`);
+  }
+  if (cell.wrap) styles.push("white-space:pre-wrap;word-break:break-word");
+  if (cell.border) styles.push(`border:${cell.border}`);
+  if (cell.borderStyle || cell.borderColor) {
+    styles.push(`border:1px ${cell.borderStyle || "solid"} ${cell.borderColor || "#ccc"}`);
+  }
+  if (cell.leftBorderStyle || cell.leftBorderColor) {
+    styles.push(`border-left:1px ${cell.leftBorderStyle || "solid"} ${cell.leftBorderColor || "#ccc"}`);
+  }
+  if (cell.rightBorderStyle || cell.rightBorderColor) {
+    styles.push(`border-right:1px ${cell.rightBorderStyle || "solid"} ${cell.rightBorderColor || "#ccc"}`);
+  }
+  if (cell.topBorderStyle || cell.topBorderColor) {
+    styles.push(`border-top:1px ${cell.topBorderStyle || "solid"} ${cell.topBorderColor || "#ccc"}`);
+  }
+  if (cell.bottomBorderStyle || cell.bottomBorderColor) {
+    styles.push(`border-bottom:1px ${cell.bottomBorderStyle || "solid"} ${cell.bottomBorderColor || "#ccc"}`);
+  }
+  return styles.length > 0 ? ` style="${styles.join(";")}"` : "";
+}
+function createHTML(data, options = {}) {
   if (typeof options === "string") {
     options = { filePath: options };
   }
   let rows = [];
-  if (Array.isArray(data) && Array.isArray(data[0])) {
+  let columns = options.columns;
+  if (data && Array.isArray(data.worksheets) && data.worksheets[0]) {
+    const ws = data.worksheets[0];
+    rows = ws.data || [];
+    if (ws.columns && Array.isArray(ws.columns) && rows.length > 0 && !Array.isArray(rows[0])) {
+      columns = normalizeSchemaToColumns(ws.columns, ws);
+      rows = getSheetData(rows, columns);
+    }
+  } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null && !Array.isArray(data[0])) {
+    const schema = options.schema || options.columns;
+    if (schema) {
+      columns = normalizeSchemaToColumns(schema, options);
+      rows = getSheetData(data, columns);
+    } else {
+      const keys = Object.keys(data[0]);
+      const headerStyle = options.headerStyle || { fontWeight: "bold" };
+      const headerRow = keys.map((k) => ({ value: k, ...headerStyle }));
+      const dataRows = data.map((obj) => keys.map((k) => ({ value: obj[k] })));
+      rows = [headerRow, ...dataRows];
+    }
+  } else if (Array.isArray(data)) {
     rows = data;
-  } else {
-    rows = normalizeTo2DArray(data);
   }
   const tableClass = options.tableClass || "spreadsheet-table";
   let html = `<table class="${tableClass}">
 `;
+  if (columns && Array.isArray(columns) && columns.some((c) => c && c.width)) {
+    html += "  <colgroup>\n";
+    columns.forEach((c) => {
+      if (c && c.width) {
+        html += `    <col style="width:${c.width}ch;">
+`;
+      } else {
+        html += `    <col>
+`;
+      }
+    });
+    html += "  </colgroup>\n";
+  }
   const coveredCells = /* @__PURE__ */ new Set();
+  const hasHeader = options.hasHeader !== false && rows.length > 0;
+  const headerRowIndex = hasHeader ? 0 : -1;
+  let inThead = false;
+  let inTbody = false;
   rows.forEach((row, rowIndex) => {
-    const isHeader = rowIndex === 0 && options.hasHeader !== false;
+    if (!Array.isArray(row)) return;
+    const isHeader = rowIndex === headerRowIndex;
+    if (isHeader) {
+      html += "  <thead>\n";
+      inThead = true;
+    } else if (!inTbody) {
+      if (inThead) {
+        html += "  </thead>\n";
+        inThead = false;
+      }
+      html += "  <tbody>\n";
+      inTbody = true;
+    }
     const tag = isHeader ? "th" : "td";
-    html += "  <tr>\n";
+    html += "    <tr>\n";
     row.forEach((cell, colIndex) => {
       const cellKey = `${rowIndex},${colIndex}`;
       if (coveredCells.has(cellKey)) {
         return;
       }
       let val = cell;
-      let style = "";
       let spanAttrs = "";
-      if (cell && typeof cell === "object") {
+      let style = "";
+      if (cell && typeof cell === "object" && !(cell instanceof Date)) {
         val = cell.value !== void 0 ? cell.value : "";
         const colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
         const rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
@@ -4770,33 +5036,31 @@ async function writeHTML(data, options = {}) {
             }
           }
         }
-        const styles = [];
-        if (cell.fontWeight) styles.push(`font-weight:${cell.fontWeight}`);
-        if (cell.fontStyle) styles.push(`font-style:${cell.fontStyle}`);
-        if (cell.backgroundColor) styles.push(`background-color:${cell.backgroundColor}`);
-        if (cell.textColor || cell.color) styles.push(`color:${cell.textColor || cell.color}`);
-        if (cell.align) styles.push(`text-align:${cell.align}`);
-        if (cell.borderStyle || cell.borderColor) {
-          styles.push(`border:1px ${cell.borderStyle || "solid"} ${cell.borderColor || "#ccc"}`);
-        }
-        if (styles.length > 0) {
-          style = ` style="${styles.join(";")}"`;
-        }
+        style = formatCellStyles(cell);
+      } else if (cell instanceof Date) {
+        val = !isNaN(cell.getTime()) ? cell.toISOString().slice(0, 10) : "";
       }
       if (val === null || val === void 0) val = "";
-      const safeVal = String(val).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      html += `    <${tag}${spanAttrs}${style}>${safeVal}</${tag}>
+      const safeVal = escapeHtml(val);
+      html += `      <${tag}${spanAttrs}${style}>${safeVal}</${tag}>
 `;
     });
-    html += "  </tr>\n";
+    html += "    </tr>\n";
   });
+  if (inThead) {
+    html += "  </thead>\n";
+  }
+  if (inTbody) {
+    html += "  </tbody>\n";
+  }
   html += "</table>";
   if (options.fullDocument) {
+    const title = escapeHtml(options.title || "Spreadsheet Export");
     html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Spreadsheet Export</title>
+<title>${title}</title>
 <style>
 table.${tableClass} { border-collapse: collapse; width: 100%; font-family: sans-serif; }
 table.${tableClass} th, table.${tableClass} td { border: 1px solid #ddd; padding: 8px; text-align: left; }
@@ -4808,6 +5072,13 @@ ${html}
 </body>
 </html>`;
   }
+  return html;
+}
+async function writeHTML(data, options = {}) {
+  if (typeof options === "string") {
+    options = { filePath: options };
+  }
+  const html = createHTML(data, options);
   if (options.filePath) {
     await fs5.promises.writeFile(options.filePath, html, "utf-8");
     return options.filePath;
@@ -4963,12 +5234,12 @@ async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
   }
   if (Array.isArray(inputData) && inputData.length > 0 && !Array.isArray(inputData[0])) {
     if (sheetOptions.schema) {
-      const columns = normalizeSchemaToColumns(sheetOptions.schema);
+      const columns = normalizeSchemaToColumns(sheetOptions.schema, sheetOptions);
       inputData = getSheetData(inputData, columns);
       sheetOptions.columns = columns;
       delete sheetOptions.schema;
     } else if (sheetOptions.columns && typeof sheetOptions.columns[0]?.cell !== "function") {
-      const columns = normalizeSchemaToColumns(sheetOptions.columns);
+      const columns = normalizeSchemaToColumns(sheetOptions.columns, sheetOptions);
       inputData = getSheetData(inputData, columns);
       sheetOptions.columns = columns;
     }
@@ -4993,6 +5264,7 @@ var writeXlsxFile2 = writeXlsxFile;
 var write_default = writeSpreadsheet;
 export {
   createDBF,
+  createHTML,
   createODS,
   createXLS,
   write_default as default,

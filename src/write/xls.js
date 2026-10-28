@@ -21,7 +21,8 @@ const BIFF = {
     CODEPAGE: 0x0042,
     WINDOW1: 0x003D,
     WINDOW2: 0x023E,
-    MERGECELLS: 0x00E5
+    MERGECELLS: 0x00E5,
+    COLINFO: 0x007D
 };
 
 const PALETTE = [
@@ -535,6 +536,23 @@ export function createXLS(data, options = {}) {
         dimView.setUint16(8, 0, true);
         dimView.setUint16(10, Math.max(1, maxCol), true);
         sheetRecords.push(createRecord(BIFF.DIMENSIONS, dimData));
+
+        // Column widths (COLINFO 0x007D)
+        if (sheet.columns && Array.isArray(sheet.columns)) {
+            sheet.columns.forEach((col, cIdx) => {
+                if (col && typeof col.width === 'number') {
+                    const colInfoData = new Uint8Array(12);
+                    const view = new DataView(colInfoData.buffer);
+                    view.setUint16(0, cIdx, true);       // colFirst
+                    view.setUint16(2, cIdx, true);       // colLast
+                    view.setUint16(4, Math.round(col.width * 256), true); // colWidth in 1/256th char
+                    view.setUint16(6, 0x000F, true);     // standard cell XF
+                    view.setUint16(8, 0x0000, true);     // flags (visible)
+                    view.setUint16(10, 0x0000, true);    // reserved
+                    sheetRecords.push(createRecord(BIFF.COLINFO, colInfoData));
+                }
+            });
+        }
 
         // Window2 (gridlines, etc.)
         const win2Data = new Uint8Array(18);

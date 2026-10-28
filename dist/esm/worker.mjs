@@ -6713,36 +6713,159 @@ async function writeDBF(data, options = {}) {
 }
 
 // src/write/schema.js
-function normalizeSchemaToColumns(schema) {
+var STYLE_PROPERTIES = [
+  "fontWeight",
+  "fontStyle",
+  "fontSize",
+  "fontFamily",
+  "color",
+  "textColor",
+  "backgroundColor",
+  "align",
+  "verticalAlign",
+  "wrap",
+  "borderColor",
+  "borderStyle",
+  "leftBorderStyle",
+  "rightBorderStyle",
+  "topBorderStyle",
+  "bottomBorderStyle",
+  "leftBorderColor",
+  "rightBorderColor",
+  "topBorderColor",
+  "bottomBorderColor",
+  "columnSpan",
+  "rowSpan",
+  "span"
+];
+function extractStyles(def) {
+  if (!def || typeof def !== "object") return {};
+  const styles = {};
+  for (const key of STYLE_PROPERTIES) {
+    if (def[key] !== void 0) {
+      styles[key] = def[key];
+    }
+  }
+  if (def.style && typeof def.style === "object") {
+    Object.assign(styles, def.style);
+  }
+  return styles;
+}
+function buildHeaderCell(colDef, fallbackName, options = {}) {
+  const rawHeader = colDef.header !== void 0 ? colDef.header : colDef.column !== void 0 ? colDef.column : colDef.name !== void 0 ? colDef.name : fallbackName;
+  const headerStyles = {
+    ...options.headerStyle || {},
+    ...colDef.headerStyle || {}
+  };
+  if (rawHeader && typeof rawHeader === "object" && !(rawHeader instanceof Date)) {
+    return {
+      value: rawHeader.value !== void 0 ? rawHeader.value : fallbackName,
+      ...headerStyles,
+      ...rawHeader
+    };
+  }
+  if (Object.keys(headerStyles).length > 0) {
+    return {
+      value: rawHeader !== void 0 && rawHeader !== null ? rawHeader : fallbackName,
+      ...headerStyles
+    };
+  }
+  return rawHeader !== void 0 && rawHeader !== null ? rawHeader : fallbackName;
+}
+function normalizeSchemaToColumns(schema, options = {}) {
   if (Array.isArray(schema)) {
-    return schema.map((col) => ({
-      header: col.column || col.header || col.name || "",
-      cell: (row, index) => {
-        const val = typeof col.value === "function" ? col.value(row, index) : col.prop ? row[col.prop] : col.column ? row[col.column] : col.name ? row[col.name] : null;
-        return {
-          value: val !== void 0 ? val : null,
-          type: col.type,
-          format: col.format,
-          ...col.style || {}
-        };
-      },
-      width: col.width
-    }));
+    return schema.map((col) => {
+      const baseStyles = extractStyles(col);
+      const header = buildHeaderCell(col, "", options);
+      return {
+        header,
+        cell: (row, index) => {
+          if (typeof col.cell === "function") {
+            const userCell = col.cell(row, index);
+            if (userCell && typeof userCell === "object" && !(userCell instanceof Date)) {
+              return {
+                type: col.type,
+                format: col.format,
+                ...baseStyles,
+                ...userCell
+              };
+            }
+            return {
+              value: userCell !== void 0 ? userCell : null,
+              type: col.type,
+              format: col.format,
+              ...baseStyles
+            };
+          }
+          const val = typeof col.value === "function" ? col.value(row, index) : col.prop ? row[col.prop] : col.column ? row[col.column] : col.name ? row[col.name] : null;
+          const dynamicStyles = typeof col.style === "function" ? col.style(val, row, index) : {};
+          if (val && typeof val === "object" && !(val instanceof Date) && "value" in val) {
+            return {
+              type: col.type,
+              format: col.format,
+              ...baseStyles,
+              ...dynamicStyles,
+              ...val
+            };
+          }
+          return {
+            value: val !== void 0 ? val : null,
+            type: col.type,
+            format: col.format,
+            ...baseStyles,
+            ...dynamicStyles
+          };
+        },
+        width: col.width
+      };
+    });
   }
   if (schema && typeof schema === "object") {
-    return Object.entries(schema).map(([propKey, colDef]) => ({
-      header: colDef.column || colDef.header || propKey,
-      cell: (row, index) => {
-        const val = typeof colDef.value === "function" ? colDef.value(row, index) : row[propKey];
-        return {
-          value: val !== void 0 ? val : null,
-          type: colDef.type,
-          format: colDef.format,
-          ...colDef.style || {}
-        };
-      },
-      width: colDef.width
-    }));
+    return Object.entries(schema).map(([propKey, colDef]) => {
+      const baseStyles = extractStyles(colDef);
+      const header = buildHeaderCell(colDef, propKey, options);
+      return {
+        header,
+        cell: (row, index) => {
+          if (typeof colDef.cell === "function") {
+            const userCell = colDef.cell(row, index);
+            if (userCell && typeof userCell === "object" && !(userCell instanceof Date)) {
+              return {
+                type: colDef.type,
+                format: colDef.format,
+                ...baseStyles,
+                ...userCell
+              };
+            }
+            return {
+              value: userCell !== void 0 ? userCell : null,
+              type: colDef.type,
+              format: colDef.format,
+              ...baseStyles
+            };
+          }
+          const val = typeof colDef.value === "function" ? colDef.value(row, index) : row ? row[propKey] : null;
+          const dynamicStyles = typeof colDef.style === "function" ? colDef.style(val, row, index) : {};
+          if (val && typeof val === "object" && !(val instanceof Date) && "value" in val) {
+            return {
+              type: colDef.type,
+              format: colDef.format,
+              ...baseStyles,
+              ...dynamicStyles,
+              ...val
+            };
+          }
+          return {
+            value: val !== void 0 ? val : null,
+            type: colDef.type,
+            format: colDef.format,
+            ...baseStyles,
+            ...dynamicStyles
+          };
+        },
+        width: colDef.width
+      };
+    });
   }
   return [];
 }
@@ -6751,11 +6874,11 @@ function normalizeSchemaToColumns(schema) {
 function getSheetData(objects, columns) {
   var headerRow;
   if (columns.some(function(column) {
-    return column.header;
+    return column.header !== void 0 && column.header !== null && column.header !== false;
   })) {
     headerRow = columns.map(function(_ref) {
       var header = _ref.header;
-      return header || null;
+      return header !== void 0 && header !== null && header !== false ? header : null;
     });
   }
   return (headerRow ? [headerRow] : []).concat(objects.map(function(object, objectIndex) {
@@ -6777,35 +6900,39 @@ function normalizeWorkbookSheets(data, options = {}) {
     sheets = data.worksheets.map((ws, i) => {
       const sheetName = ws.worksheetName || ws.sheet || ws.name || `Sheet${i + 1}`;
       let rows = ws.data || [];
+      let columns = ws.columns;
       if (ws.columns && Array.isArray(ws.columns) && rows.length > 0 && !Array.isArray(rows[0])) {
-        const cols = normalizeSchemaToColumns(ws.columns);
-        rows = getSheetData(rows, cols);
+        columns = normalizeSchemaToColumns(ws.columns, { ...options, ...ws });
+        rows = getSheetData(rows, columns);
       }
-      return { name: sheetName, rows };
+      return { name: sheetName, rows, columns };
     });
   } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null && !Array.isArray(data[0]) && (data[0].sheet || data[0].data)) {
     sheets = data.map((s, i) => {
       const sheetName = s.sheet || s.name || `Sheet${i + 1}`;
       let rows = s.data || [];
       const schema = s.schema || s.columns || options.schema;
+      let columns = s.columns;
       if (schema && rows.length > 0 && !Array.isArray(rows[0])) {
-        const cols = normalizeSchemaToColumns(schema);
-        rows = getSheetData(rows, cols);
+        columns = normalizeSchemaToColumns(schema, { ...options, ...s });
+        rows = getSheetData(rows, columns);
       }
-      return { name: sheetName, rows };
+      return { name: sheetName, rows, columns };
     });
   } else if (Array.isArray(data) && data.length > 0 && !Array.isArray(data[0])) {
     const schema = options.schema || options.columns;
     if (schema) {
-      const columns = normalizeSchemaToColumns(schema);
+      const columns = normalizeSchemaToColumns(schema, options);
       const grid = getSheetData(data, columns);
       sheets = [{
         name: options.sheet || "Sheet1",
-        rows: grid
+        rows: grid,
+        columns
       }];
     } else {
       const keys = Object.keys(data[0] || {});
-      const headerRow = keys.map((k) => ({ value: k, fontWeight: "bold" }));
+      const headerStyle = options.headerStyle || { fontWeight: "bold" };
+      const headerRow = keys.map((k) => ({ value: k, ...headerStyle }));
       const dataRows = data.map((obj) => keys.map((k) => ({ value: obj[k] })));
       sheets = [{
         name: options.sheet || "Sheet1",
@@ -6815,7 +6942,8 @@ function normalizeWorkbookSheets(data, options = {}) {
   } else if (Array.isArray(data)) {
     sheets = [{
       name: options.sheet || "Sheet1",
-      rows: data
+      rows: data,
+      columns: options.columns
     }];
   } else {
     sheets = [{
@@ -6976,6 +7104,28 @@ function buildContentXml(sheets) {
 `;
   xml += `    </number:date-style>
 `;
+  const colStylesMap = /* @__PURE__ */ new Map();
+  let nextColStyleId = 1;
+  for (const sheet of sheets) {
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col) => {
+        if (col && typeof col.width === "number") {
+          const widthCm = (col.width * 0.2).toFixed(2);
+          if (!colStylesMap.has(widthCm)) {
+            colStylesMap.set(widthCm, `co_${nextColStyleId++}`);
+          }
+        }
+      });
+    }
+  }
+  for (const [widthCm, styleName] of colStylesMap.entries()) {
+    xml += `    <style:style style:name="${styleName}" style:family="table-column">
+`;
+    xml += `      <style:table-column-properties style:column-width="${widthCm}cm"/>
+`;
+    xml += `    </style:style>
+`;
+  }
   for (const { name, style } of stylesMap.values()) {
     xml += serializeOdsStyle(name, style);
   }
@@ -6988,6 +7138,19 @@ function buildContentXml(sheets) {
   for (const sheet of sheets) {
     xml += `      <table:table table:name="${escapeXml(sheet.name)}">
 `;
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col) => {
+        if (col && typeof col.width === "number") {
+          const widthCm = (col.width * 0.2).toFixed(2);
+          const styleName = colStylesMap.get(widthCm);
+          xml += `        <table:table-column table:style-name="${styleName}"/>
+`;
+        } else {
+          xml += `        <table:table-column/>
+`;
+        }
+      });
+    }
     const coveredCells = /* @__PURE__ */ new Set();
     for (let r = 0; r < sheet.rows.length; r++) {
       const row = sheet.rows[r];
@@ -7142,7 +7305,8 @@ var BIFF = {
   CODEPAGE: 66,
   WINDOW1: 61,
   WINDOW2: 574,
-  MERGECELLS: 229
+  MERGECELLS: 229,
+  COLINFO: 125
 };
 var PALETTE = [
   { idx: 8, r: 0, g: 0, b: 0 },
@@ -7574,6 +7738,21 @@ function createXLS(data, options = {}) {
     dimView.setUint16(8, 0, true);
     dimView.setUint16(10, Math.max(1, maxCol), true);
     sheetRecords.push(createRecord(BIFF.DIMENSIONS, dimData));
+    if (sheet.columns && Array.isArray(sheet.columns)) {
+      sheet.columns.forEach((col, cIdx) => {
+        if (col && typeof col.width === "number") {
+          const colInfoData = new Uint8Array(12);
+          const view = new DataView(colInfoData.buffer);
+          view.setUint16(0, cIdx, true);
+          view.setUint16(2, cIdx, true);
+          view.setUint16(4, Math.round(col.width * 256), true);
+          view.setUint16(6, 15, true);
+          view.setUint16(8, 0, true);
+          view.setUint16(10, 0, true);
+          sheetRecords.push(createRecord(BIFF.COLINFO, colInfoData));
+        }
+      });
+    }
     const win2Data = new Uint8Array(18);
     new DataView(win2Data.buffer).setUint16(0, 694, true);
     sheetRecords.push(createRecord(BIFF.WINDOW2, win2Data));
