@@ -1,11 +1,15 @@
 import { expect } from 'chai';
 import fs from 'fs';
 import { zipSync } from 'fflate';
-import { tabularjs as parser, detectFormat } from '../../src/index.js';
+import { tabularjs as parser, detectFormat, registerPlugin } from '../../src/index.js';
+import { allPlugins } from '../../src/plugins/index.js';
 
 const encode = (text) => new TextEncoder().encode(text);
 
 describe('Format Detection (magic bytes)', () => {
+    before(() => {
+        registerPlugin(...allPlugins);
+    });
     describe('detectFormat', () => {
         it('should detect OLE2 compound files as xls', async () => {
             const buffer = new Uint8Array(16);

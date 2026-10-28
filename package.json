@@ -1,40 +1,67 @@
 {
   "name": "spreadsheet-utils",
   "version": "1.0.0",
-  "description": "Ultra-lightweight, low-memory universal spreadsheet reader supporting 16+ formats (XLSX, XLS, ODS, CSV, TSV, DBF, DIF, Lotus 1-2-3, SLK, HTML tables, XML Spreadsheet, Apple Numbers) with streaming SAX parsing, schema validation, and Jspreadsheet compatibility.",
+  "description": "Ultra-lightweight, low-memory universal spreadsheet toolkit merging read-excel-file streaming SAX reader with TabularJS multi-format plugins and styled write-excel-file writer. Supports 16+ formats (XLSX, XLS, ODS, CSV, TSV, DBF, DIF, Lotus 1-2-3, SLK, HTML tables, XML Spreadsheet, Apple Numbers) in Node.js and Browser.",
   "type": "module",
-  "main": "./src/index.js",
-  "module": "./src/index.js",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
+  "browser": "./dist/browser/spreadsheet-utils.min.js",
   "types": "./index.d.ts",
   "sideEffects": false,
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "import": "./src/index.js",
-      "default": "./src/index.js"
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.cjs",
+      "default": "./dist/esm/index.mjs"
     },
-    "./node": {
-      "types": "./index.d.ts",
-      "import": "./src/node.js",
-      "default": "./src/node.js"
+    "./plugins": {
+      "types": "./plugins.d.ts",
+      "import": "./dist/esm/plugins.mjs",
+      "require": "./dist/cjs/plugins.cjs",
+      "default": "./dist/esm/plugins.mjs"
     },
-    "./browser": {
-      "types": "./index.d.ts",
-      "import": "./src/browser.js",
-      "default": "./src/browser.js"
+    "./write": {
+      "types": "./write.d.ts",
+      "import": "./dist/esm/write.mjs",
+      "require": "./dist/cjs/write.cjs",
+      "default": "./dist/esm/write.mjs"
     },
-    "./web-worker": {
-      "types": "./index.d.ts",
-      "import": "./src/web-worker.js",
-      "default": "./src/web-worker.js"
+    "./full": {
+      "types": "./full.d.ts",
+      "import": "./dist/esm/full.mjs",
+      "require": "./dist/cjs/full.cjs",
+      "default": "./dist/esm/full.mjs"
+    },
+    "./worker": {
+      "types": "./worker.d.ts",
+      "import": "./dist/esm/worker.mjs",
+      "require": "./dist/cjs/worker.cjs",
+      "default": "./dist/esm/worker.mjs"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "index.d.ts",
+    "plugins.d.ts",
+    "write.d.ts",
+    "full.d.ts",
+    "worker.d.ts",
+    "README.md",
+    "UPSTREAM.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "build": "node scripts/build.js",
+    "pretest": "node scripts/build.js",
     "test": "mocha \"src/**/*.test.js\" \"test/**/*.test.js\"",
     "test:integration": "mocha test/integration/**/*.test.js",
     "test:read-excel-file": "mocha test/read-excel-file/testCases.test.js",
-    "test:tabularjs": "mocha \"test/tabularjs/**/*.test.js\""
+    "test:tabularjs": "mocha \"test/tabularjs/**/*.test.js\"",
+    "sync:check": "node scripts/sync-upstream.js --check",
+    "sync:pull": "node scripts/sync-upstream.js --sync",
+    "sync:verify": "node scripts/sync-upstream.js --verify"
   },
   "keywords": [
     "spreadsheet",
@@ -50,8 +77,11 @@
     "streaming",
     "low-memory",
     "read-excel-file",
+    "write-excel-file",
     "tabularjs",
-    "parser"
+    "parser",
+    "writer",
+    "export"
   ],
   "author": "",
   "license": "MIT",
@@ -62,6 +92,7 @@
   },
   "devDependencies": {
     "chai": "^6.3.0",
+    "esbuild": "^0.28.2",
     "mocha": "^12.0.3"
   }
 }

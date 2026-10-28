@@ -1,5 +1,6 @@
-import { readSpreadsheet, parseTabular } from './core/dispatcher.js';
+import { readSpreadsheet, parseTabular, createReader, iterateSpreadsheet } from './core/dispatcher.js';
 import { detectFormat } from './core/detector.js';
+import { registerPlugin, unregisterPlugin, isPluginRegistered } from './core/registry.js';
 
 // Schema exports from read-excel-file
 import parseSheetData from './schema/parseSheetData.js';
@@ -12,18 +13,8 @@ import InvalidInputError from './xlsx/file/InvalidInputError.js';
 import InvalidSpreadsheetError from './xlsx/InvalidSpreadsheetError.js';
 import SheetNotFoundError from './xlsx/SheetNotFoundError.js';
 
-// Specific format parsers
-import { parseCSVFile, parseCSVString } from './parser/csv.js';
-import { parseXLS, parseXLSBuffer } from './parser/xls.js';
+// Core XLSX parser
 import { parseXLSX } from './parser/xlsx.js';
-import { parseODS } from './parser/ods.js';
-import { parseDBF, parseDBFBuffer } from './parser/dbf.js';
-import { parseDIF, parseDIFString } from './parser/dif.js';
-import { parseLotus, parseLotusBuffer, parseWK1, parseWK3, parseWK4 } from './parser/lotus.js';
-import { parseSLK, parseSLKString } from './parser/slk.js';
-import { parseHTMLTable, parseAllHTMLTables } from './parser/table.js';
-import { parseXMLSpreadsheet, parseXMLSpreadsheetString } from './parser/xml.js';
-import { parseNumbers, isNumbersFile } from './parser/numbers.js';
 
 // read-excel-file backwards compatibility
 export function readSheet(input, sheet, options) {
@@ -34,46 +25,38 @@ export function readSheet(input, sheet, options) {
     return readSpreadsheet(input, { ...options, sheet });
 }
 
-export const readXlsxFile = readSpreadsheet;
-export const tabularjs = parseTabular;
+const readXlsxFile = readSpreadsheet;
+const tabularjs = parseTabular;
+const parser = parseTabular;
 
 export {
+    // Core readers
     readSpreadsheet,
+    readSpreadsheet as default,
+    readXlsxFile,
+    iterateSpreadsheet,
     parseTabular,
+    tabularjs,
+    parser,
+    createReader,
     detectFormat,
-    // read-excel-file schema
+
+    // Plugin registry
+    registerPlugin,
+    unregisterPlugin,
+    isPluginRegistered,
+
+    // Schema validation and mapping
     parseSheetData,
     Integer,
     Email,
     URL,
-    // errors
+
+    // Errors
     InvalidInputError,
     InvalidSpreadsheetError,
     SheetNotFoundError,
-    // individual parsers
-    parseCSVFile,
-    parseCSVString,
-    parseXLS,
-    parseXLSBuffer,
-    parseXLSX,
-    parseODS,
-    parseDBF,
-    parseDBFBuffer,
-    parseDIF,
-    parseDIFString,
-    parseLotus,
-    parseLotusBuffer,
-    parseWK1,
-    parseWK3,
-    parseWK4,
-    parseSLK,
-    parseSLKString,
-    parseHTMLTable,
-    parseAllHTMLTables,
-    parseXMLSpreadsheet,
-    parseXMLSpreadsheetString,
-    parseNumbers,
-    isNumbersFile
-};
 
-export default readSpreadsheet;
+    // Core parser
+    parseXLSX
+};

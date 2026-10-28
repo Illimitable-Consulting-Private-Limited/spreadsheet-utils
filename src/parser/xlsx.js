@@ -22,7 +22,7 @@ export async function parseXLSX(input, options = {}) {
         unpacker = unpackXlsxFileNode;
     }
 
-    const contents = await unpacker(input);
+    const contents = await unpacker(input, options);
     const sheets = await parseSpreadsheetContents(undefined, parseXml, contents, options);
 
     const worksheets = (sheets || []).map((s) => {

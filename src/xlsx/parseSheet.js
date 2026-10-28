@@ -238,7 +238,13 @@ export default function parseSheet(content, parseXml, { sharedStrings, styles, e
         }
       }
       // Add the parsed row to the list of rows.
+      if (options && options.maxColumns && state.row.length > options.maxColumns) {
+        state.row = state.row.slice(0, options.maxColumns);
+      }
       state.rows.push(state.row)
+      if (options && options.maxRows && state.rows.length >= options.maxRows && options.throwOnLimit) {
+        throw new Error(`Row limit of ${options.maxRows} exceeded`);
+      }
       // Update the total non-empty row count.
       if (state.row.length > 0) {
         state.dataRowCount = state.rowNumber

@@ -12,12 +12,12 @@ import checkpoint, { resetCheckpoint } from '../utility/checkpoint.js'
  * @param  {(Blob|ArrayBuffer)} input
  * @return {Promise<Record<string,Uint8Array>} Resolves to an object holding `*.xlsx` file entries.
  */
-export default function unpackXlsxFile(input) {
+export default function unpackXlsxFile(input, options) {
 	resetCheckpoint()
 	checkpoint('unpack files')
 	return getArrayBuffer(input).then((arrayBuffer) => {
 		validateLeadingBytes(new Uint8Array(arrayBuffer))
-		return unzipFromArrayBuffer(arrayBuffer, { filter: filterZipArchiveEntry })
+		return unzipFromArrayBuffer(arrayBuffer, { filter: filterZipArchiveEntry, ...options })
 			.then(
 				result => result,
 				(error) => {

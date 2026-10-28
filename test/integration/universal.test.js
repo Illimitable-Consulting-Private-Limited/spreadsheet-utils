@@ -9,13 +9,18 @@ import {
     tabularjs,
     parseTabular,
     detectFormat,
+    registerPlugin,
     Integer
 } from '../../src/index.js';
+import { allPlugins } from '../../src/plugins/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testCasesDir = path.resolve(__dirname, '../read-excel-file/testCases');
 
 describe('Unified Spreadsheet Reader (Integration Tests)', () => {
+    before(() => {
+        registerPlugin(...allPlugins);
+    });
 
     describe('XLSX format with read-excel-file streaming engine', () => {
         const booleanXlsx = path.join(testCasesDir, 'boolean.xlsx');

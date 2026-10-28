@@ -24,18 +24,28 @@ export default function unzipFromArrayBuffer(input, options) {
  * @param  {boolean} isAsync — Should be `true` when `unzip()` returns a `Promise`, `false` otherwise.
  * @return {Promise<Record<string,Uint8Array>> | Record<string,Uint8Array>} Resolves to an object holding `*.zip` file entries.
  */
-export function unzipFromArrayBufferUsingFunction(input, { filter } = {}, unzip, isAsync) {
+export function unzipFromArrayBufferUsingFunction(input, options = {}, unzip, isAsync) {
+	const filter = options.filter;
+	const maxBytes = options.maxUncompressedSize || options.maxBytes || (256 * 1024 * 1024);
+	let totalUncompressed = 0;
+
 	// Read the `.zip` archive.
 	// `result` is either `object` or `Promise<object>`
 	return unzip(new Uint8Array(input), {
-		// Ignore certain types of files.
+		// Ignore certain types of files and protect against zip bombs
 		filter: (file) => {
 			if (filter) {
-				return filter({
-					path: file.name
-				})
+				if (!filter({ path: file.name })) {
+					return false;
+				}
 			}
-			return true
+			if (file.originalSize) {
+				totalUncompressed += file.originalSize;
+				if (totalUncompressed > maxBytes) {
+					throw new Error(`Zip decompression limit of ${maxBytes} bytes exceeded (possible zip bomb)`);
+				}
+			}
+			return true;
 		}
 	}).then(
 		result => result,

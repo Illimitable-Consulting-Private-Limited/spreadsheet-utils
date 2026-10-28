@@ -71,7 +71,10 @@ import unzipFromStream_ from './unzipFromStream.unzipper.js'
  * @param  {Stream} stream
  * @return {Promise<Record<string,Buffer>>} Resolves to an object holding `*.zip` file entries. P.S. `Buffer` is a `Uint8Array`.
  */
-export default function unzipFromStream(stream, { filter } = {}) {
+export default function unzipFromStream(stream, options = {}) {
+	const filter = options.filter;
+	const maxBytes = options.maxUncompressedSize || options.maxBytes || (256 * 1024 * 1024);
+	let totalUncompressed = 0;
 	// The `files` object stores the files and their contents.
 	const files = {}
 	const filesData = {}
@@ -95,6 +98,10 @@ export default function unzipFromStream(stream, { filter } = {}) {
 	}
 
 	const onFileData = (filePath, chunk) => {
+		totalUncompressed += chunk.length;
+		if (totalUncompressed > maxBytes) {
+			throw new Error(`Zip decompression limit of ${maxBytes} bytes exceeded (possible zip bomb)`);
+		}
 		// filesData[filePath].push(chunk)
 		if (filesData[filePath].size === undefined) {
 			filesData[filePath].chunks.push(chunk)

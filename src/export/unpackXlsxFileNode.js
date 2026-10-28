@@ -13,7 +13,7 @@ import checkpoint, { resetCheckpoint } from '../utility/checkpoint.js'
  * @param  {(string|Stream|Buffer|Blob)} input
  * @return {Promise<Record<string,Uint8Array>} Resolves to an object holding `*.xlsx` file entries.
  */
-export default function unpackXlsxFile(input) {
+export default function unpackXlsxFile(input, options) {
   resetCheckpoint()
   checkpoint('unpack files')
   const stream = convertInputToNodeStream(input)
@@ -36,7 +36,7 @@ export default function unpackXlsxFile(input) {
       // an "error" event, which is going to be caught inside `unzipFromStream_()` function.
       .pipe(new InputValidationStream())
 
-    unzipFromStream(streamWithInputValidation, { filter: filterZipArchiveEntry })
+    unzipFromStream(streamWithInputValidation, { filter: filterZipArchiveEntry, ...options })
       .then(
         resolve,
         (error) => {

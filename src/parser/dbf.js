@@ -273,6 +273,10 @@ export function parseDBFBuffer(buffer) {
         buffer = new Uint8Array(buffer);
     }
 
+    if (!buffer || buffer.length < 32) {
+        throw new Error('Invalid DBF file: buffer too small for header');
+    }
+
     // Parse header
     const header = parseHeader(buffer);
 
@@ -280,7 +284,7 @@ export function parseDBFBuffer(buffer) {
     const fields = [];
     let offset = 32; // Start after header
 
-    while (offset < header.headerLength - 1) {
+    while (offset < header.headerLength - 1 && offset + 32 <= buffer.length) {
         const byte = buffer[offset];
 
         // 0x0D marks end of field descriptors
@@ -300,7 +304,13 @@ export function parseDBFBuffer(buffer) {
     const data = [];
     const deletedRecords = [];
 
-    for (let i = 0; i < header.recordCount; i++) {
+    const maxPossibleRecords = (header.recordLength > 0 && buffer.length > header.headerLength)
+        ? Math.floor((buffer.length - header.headerLength) / header.recordLength)
+        : 0;
+    const count = Math.min(header.recordCount, Math.max(0, maxPossibleRecords));
+
+    for (let i = 0; i < count; i++) {
+        if (offset >= buffer.length) break;
         // First byte of record: 0x20 = valid, 0x2A = deleted
         const deletionFlag = buffer[offset];
         offset++;
@@ -308,6 +318,7 @@ export function parseDBFBuffer(buffer) {
         const record = [];
 
         for (const field of fields) {
+            if (offset >= buffer.length) break;
             const value = parseFieldValue(buffer, offset, field);
             record.push(value);
             offset += field.length;

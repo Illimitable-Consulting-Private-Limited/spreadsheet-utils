@@ -23,10 +23,19 @@ export async function loadAsBuffer(input) {
         return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
     }
 
-    // File path (Node.js)
+    // File path (Node.js) or raw string content
     if (typeof input === 'string') {
         if (!fs) fs = await import('fs');
-        return new Uint8Array(fs.readFileSync(input));
+        if (input.length < 4096 && !input.includes('\n') && !input.includes('\r')) {
+            try {
+                if (fs.existsSync(input)) {
+                    return new Uint8Array(fs.readFileSync(input));
+                }
+            } catch {
+                // Not a file path, treat as raw text
+            }
+        }
+        return new TextEncoder().encode(input);
     }
 
     // File/Blob (Browser) - direct read
@@ -61,7 +70,16 @@ export async function loadAsString(input, encoding = 'utf-8') {
     if (enc === 'utf-8' || enc === 'utf8') {
         if (typeof input === 'string') {
             if (!fs) fs = await import('fs');
-            return fs.readFileSync(input, 'utf-8');
+            if (input.length < 4096 && !input.includes('\n') && !input.includes('\r')) {
+                try {
+                    if (fs.existsSync(input)) {
+                        return fs.readFileSync(input, 'utf-8');
+                    }
+                } catch {
+                    // Not a file path, treat as raw content
+                }
+            }
+            return input;
         }
         if (typeof File !== 'undefined' && input instanceof File ||
             typeof Blob !== 'undefined' && input instanceof Blob) {

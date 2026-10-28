@@ -1,17 +1,20 @@
 import { getZipEntryNames } from '../zip/zip-utils.js';
+import { runSniffers } from './registry.js';
 
 /**
  * Detect a spreadsheet format from file content (magic bytes and text heuristics).
+ * Checks core XLSX first, then registered plugin sniffers, then fallback heuristics.
  *
  * @param {Uint8Array} buffer - File raw bytes
+ * @param {Set} [localSniffers] - Optional local sniffers set
  * @returns {Promise<string|null>} Detected extension (e.g. 'xlsx', 'ods', 'xls', 'csv') or null
  */
-export async function detectFormat(buffer) {
+export async function detectFormat(buffer, localSniffers) {
     if (!buffer || buffer.length < 4) {
         return null;
     }
 
-    // ZIP container: xlsx, ods or Apple Numbers
+    // 1. Check ZIP container (XLSX, ODS, Apple Numbers)
     if (buffer[0] === 0x50 && buffer[1] === 0x4B && (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07)) {
         try {
             const names = getZipEntryNames(buffer);
@@ -25,11 +28,18 @@ export async function detectFormat(buffer) {
                 return 'ods';
             }
         } catch {
-            // Corrupt archive; fall through to xlsx as most common
+            // Corrupt archive; fall through to xlsx
         }
         return 'xlsx';
     }
 
+    // 2. Run registered plugin sniffers if any
+    const pluginDetected = await runSniffers(buffer, localSniffers);
+    if (pluginDetected) {
+        return pluginDetected;
+    }
+
+    // 3. Fallback heuristics for known formats (helps produce informative missing-plugin errors)
     // OLE2 compound file (legacy Excel .xls)
     if (buffer[0] === 0xD0 && buffer[1] === 0xCF && buffer[2] === 0x11 && buffer[3] === 0xE0) {
         return 'xls';

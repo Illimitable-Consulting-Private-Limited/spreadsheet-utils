@@ -1,64 +1,40 @@
-import { parseXLS } from '../parser/xls.js';
 import { parseXLSX } from '../parser/xlsx.js';
-import { parseODS } from '../parser/ods.js';
-import { parseLotus } from '../parser/lotus.js';
-import { parseCSVFile } from '../parser/csv.js';
-import { parseXMLSpreadsheet } from '../parser/xml.js';
-import { parseDIF } from '../parser/dif.js';
-import { parseSLK } from '../parser/slk.js';
-import { parseHTMLTable } from '../parser/table.js';
-import { parseDBF } from '../parser/dbf.js';
-import { parseNumbers } from '../parser/numbers.js';
 import { loadAsBuffer } from '../utils/loader.js';
 import { detectFormat } from './detector.js';
+import { getParserForExtension, createMissingPluginError, KNOWN_PLUGIN_MAPPINGS } from './registry.js';
 import parseSheetData from '../schema/parseSheetData.js';
 
 /**
- * Route a resolved format extension to its parser
+ * Route a resolved format extension to its parser.
+ * Handles core XLSX directly, looks up plugins in local or global registry,
+ * or throws a helpful missing-plugin error.
  *
  * @param {string} ext - Lowercase file extension
  * @param {any} file - Input file
- * @param {Object} options - Options
- * @returns {Promise<Object>|null}
+ * @param {Object} [options={}] - Parser options
+ * @param {Object} [context={}] - Execution context with optional localParsers
+ * @returns {Promise<Object>}
  */
-export function dispatch(ext, file, options = {}) {
-    switch (ext) {
-        case 'xls':
-            return parseXLS(file, options);
-        case 'xlsx':
-            return parseXLSX(file, options);
-        case 'ods':
-            return parseODS(file, options);
-        case 'numbers':
-            return parseNumbers(file, options);
-        case 'wks':
-        case 'wk1':
-        case 'wk3':
-        case 'wk4':
-        case '123':
-            return parseLotus(file, options);
-        case 'csv':
-            return parseCSVFile(file, options);
-        case 'tsv':
-        case 'tab':
-            return parseCSVFile(file, { ...options, delimiter: '\t' });
-        case 'txt':
-            return parseCSVFile(file, { ...options, delimiter: options.delimiter || '\t' });
-        case 'xml':
-            return parseXMLSpreadsheet(file, options);
-        case 'dif':
-            return parseDIF(file, options);
-        case 'slk':
-        case 'sylk':
-            return parseSLK(file, options);
-        case 'html':
-        case 'htm':
-            return parseHTMLTable(file, options);
-        case 'dbf':
-            return parseDBF(file, options);
-        default:
-            return null;
+export function dispatch(ext, file, options = {}, context = {}) {
+    const key = (ext || '').toLowerCase().replace(/^\./, '');
+
+    // Core format: XLSX is built-in
+    if (key === 'xlsx') {
+        return parseXLSX(file, options);
     }
+
+    // Check plugin registry (local scoped registry first, then global)
+    const parser = getParserForExtension(key, context.localParsers);
+    if (parser) {
+        return parser(key, file, options);
+    }
+
+    // If format is a known plugin format but not registered, give helpful diagnostic
+    if (KNOWN_PLUGIN_MAPPINGS[key]) {
+        throw createMissingPluginError(key);
+    }
+
+    return null;
 }
 
 /**
@@ -67,11 +43,22 @@ export function dispatch(ext, file, options = {}) {
  *
  * @param {string|File|Blob|Uint8Array|ArrayBuffer|Buffer} file
  * @param {Object} [options={}]
+ * @param {Object} [context={}]
  * @returns {Promise<{ worksheets: Array<any> }>}
  */
-export async function parseTabular(file, options = {}) {
+export async function parseTabular(file, options = {}, context = {}) {
     if (!file) {
         throw new Error('Invalid file');
+    }
+
+    // Security check: maxFileSize if configured
+    if (options.maxFileSize) {
+        if (typeof file === 'object' && typeof file.size === 'number' && file.size > options.maxFileSize) {
+            throw new Error(`File size limit of ${options.maxFileSize} bytes exceeded`);
+        }
+        if (file instanceof Uint8Array && file.length > options.maxFileSize) {
+            throw new Error(`File size limit of ${options.maxFileSize} bytes exceeded`);
+        }
     }
 
     // Normalize raw byte inputs
@@ -106,10 +93,17 @@ export async function parseTabular(file, options = {}) {
     }
 
     if (ext) {
-        const result = dispatch(ext, file, options);
+        const result = dispatch(ext, file, options, context);
         if (result) {
             return await result;
         }
+        if (!KNOWN_PLUGIN_MAPPINGS[ext]) {
+            throw new Error(`Unsupported file type: ${ext || fileName}`);
+        }
+    }
+
+    if (!ext && typeof file === 'string' && !file.includes('\n') && !file.includes('<')) {
+        throw new Error(`Unsupported file type: ${fileName || '(none)'}`);
     }
 
     // Unknown or missing extension: sniff format from content
@@ -117,32 +111,46 @@ export async function parseTabular(file, options = {}) {
     let detected = null;
     try {
         buffer = await loadAsBuffer(file);
-        detected = await detectFormat(buffer);
-    } catch {
+        if (options.maxFileSize && buffer.length > options.maxFileSize) {
+            throw new Error(`File size limit of ${options.maxFileSize} bytes exceeded`);
+        }
+        detected = await detectFormat(buffer, context.localSniffers);
+    } catch (err) {
+        if (err && err.message && err.message.includes('File size limit')) {
+            throw err;
+        }
         // Fall through
     }
 
     if (detected) {
-        const result = dispatch(detected, buffer || file, options);
+        const result = dispatch(detected, buffer || file, options, context);
         if (result) {
             return await result;
         }
     }
 
-    throw new Error(`Unsupported file type: ${ext || fileName || '(buffer)'}`);
+    if (ext && KNOWN_PLUGIN_MAPPINGS[ext]) {
+        throw createMissingPluginError(ext, fileName);
+    }
+    if (detected && KNOWN_PLUGIN_MAPPINGS[detected]) {
+        throw createMissingPluginError(detected, fileName);
+    }
+
+    throw new Error(`Unsupported file type: ${ext || detected || fileName || '(buffer)'}`);
 }
 
 /**
  * Universal spreadsheet reader supporting both read-excel-file options/output
- * and TabularJS format across all 16+ spreadsheet formats.
+ * and TabularJS format across XLSX and registered plugin formats.
  *
  * @param {string|File|Blob|Uint8Array|ArrayBuffer|Buffer} file
  * @param {Object} [options={}]
+ * @param {Object} [context={}]
  * @returns {Promise<any[][] | { rows: any[], errors: any[] } | Array<{ name: string, data: any[][] }> | { worksheets: any[] }>}
  */
-export async function readSpreadsheet(file, options = {}) {
+export async function readSpreadsheet(file, options = {}, context = {}) {
     // 1. Get tabular worksheets structure
-    const tabularResult = await parseTabular(file, options);
+    const tabularResult = await parseTabular(file, options, context);
     const worksheets = tabularResult.worksheets || [];
 
     // If caller explicitly requested TabularJS format or worksheets
@@ -178,7 +186,19 @@ export async function readSpreadsheet(file, options = {}) {
         }
     }
 
-    const data = (selectedWorksheet && selectedWorksheet.data) ? selectedWorksheet.data : [];
+    let data = (selectedWorksheet && selectedWorksheet.data) ? selectedWorksheet.data : [];
+
+    // Enforce maxRows / maxColumns bounds if requested
+    if (options.maxColumns && data.length > 0) {
+        data = data.map(r => r.length > options.maxColumns ? r.slice(0, options.maxColumns) : r);
+    }
+    if (options.maxRows && data.length > options.maxRows) {
+        data = data.slice(0, options.maxRows);
+    }
+
+    if (typeof options.onRow === 'function') {
+        data.forEach((row, i) => options.onRow(row, i));
+    }
 
     // If caller provided schema for object transformation / validation
     if (options.schema) {
@@ -187,4 +207,109 @@ export async function readSpreadsheet(file, options = {}) {
 
     // Default: return 2D array of rows
     return data;
+}
+
+/**
+ * Streaming row iterator yielding rows one-by-one via an async generator.
+ * Provides constant O(1) memory consumption for large datasets.
+ *
+ * @param {string|File|Blob|Uint8Array|ArrayBuffer|Buffer} file
+ * @param {Object} [options={}]
+ * @param {Object} [context={}]
+ * @returns {AsyncGenerator<any[], void, unknown>}
+ */
+export async function* iterateSpreadsheet(file, options = {}, context = {}) {
+    const rowQueue = [];
+    let resolveNext = null;
+    let finished = false;
+    let parseError = null;
+
+    const streamingOptions = {
+        ...options,
+        onRow: (row, rowIndex) => {
+            rowQueue.push(row);
+            if (resolveNext) {
+                const cb = resolveNext;
+                resolveNext = null;
+                cb();
+            }
+        }
+    };
+
+    const parsePromise = readSpreadsheet(file, streamingOptions, context)
+        .then(() => {
+            finished = true;
+            if (resolveNext) {
+                const cb = resolveNext;
+                resolveNext = null;
+                cb();
+            }
+        })
+        .catch((err) => {
+            parseError = err;
+            finished = true;
+            if (resolveNext) {
+                const cb = resolveNext;
+                resolveNext = null;
+                cb();
+            }
+        });
+
+    while (true) {
+        if (rowQueue.length > 0) {
+            yield rowQueue.shift();
+        } else if (finished) {
+            if (parseError) {
+                throw parseError;
+            }
+            break;
+        } else {
+            await new Promise((resolve) => {
+                resolveNext = resolve;
+            });
+        }
+    }
+
+    await parsePromise;
+}
+
+/**
+ * Factory to create an isolated reader instance with dedicated plugins.
+ * Useful when multiple parts of an app require different format sets without mutating global state.
+ *
+ * @param {Array<Object>|Object} plugins
+ * @returns {Function & { tabular: Function, register: Function, iterate: Function }}
+ */
+export function createReader(plugins = []) {
+    const localParsers = new Map();
+    const localSniffers = new Set();
+    const pluginList = Array.isArray(plugins) ? plugins : [plugins];
+
+    function addPlugins(list) {
+        for (const plugin of list) {
+            if (!plugin || typeof plugin !== 'object') continue;
+            if (Array.isArray(plugin.extensions) && typeof plugin.parse === 'function') {
+                for (const ext of plugin.extensions) {
+                    localParsers.set(ext.toLowerCase(), plugin.parse);
+                }
+            }
+            if (typeof plugin.detect === 'function') {
+                localSniffers.add(plugin.detect);
+            }
+        }
+    }
+
+    addPlugins(pluginList);
+
+    const context = { localParsers, localSniffers };
+
+    const reader = (file, options = {}) => readSpreadsheet(file, options, context);
+    reader.tabular = (file, options = {}) => parseTabular(file, options, context);
+    reader.iterate = (file, options = {}) => iterateSpreadsheet(file, options, context);
+    reader.register = (...extra) => {
+        addPlugins(extra);
+        return reader;
+    };
+
+    return reader;
 }
