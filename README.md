@@ -1,39 +1,105 @@
 # spreadsheet-utils
 
-Ultra-lightweight, low-memory universal spreadsheet toolkit for JavaScript (Node.js, Browsers, and Web Workers).
+[![CI](https://github.com/illimitable/spreadsheet-utils/actions/workflows/upstream-sync.yml/badge.svg)](https://github.com/illimitable/spreadsheet-utils/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Bundle Size (Core Reader)](https://img.shields.io/badge/Core%20Reader-44%20KB%20min%20%2F%2014%20KB%20gzip-success)](https://bundlephobia.com)
+[![Formats Supported](https://img.shields.io/badge/Formats%20Supported-16%2B-blueviolet)](https://github.com/illimitable/spreadsheet-utils#supported-formats-matrix)
 
-Merges the streaming, low-memory architecture of **[`read-excel-file`](https://www.npmjs.com/package/read-excel-file)** with the extensive format support of **[`tabularjs`](https://github.com/jspreadsheet/tabularjs)** and the styled XLSX generator from **[`write-excel-file`](https://www.npmjs.com/package/write-excel-file)**.
+**Ultra-lightweight, low-memory universal spreadsheet toolkit for JavaScript & TypeScript** (Node.js, Browsers, and Web Workers).
+
+Merges the streaming, low-memory SAX architecture of **[`read-excel-file`](https://www.npmjs.com/package/read-excel-file)** with the multi-format versatility of **[`tabularjs`](https://github.com/jspreadsheet/tabularjs)** and the rich styled workbook generator from **[`write-excel-file`](https://www.npmjs.com/package/write-excel-file)**.
 
 ---
 
-## Highlights
+## Table of Contents
 
-- **Lightweight Core & Modular Plugin Architecture**:
-  - Core package bundles **only** the streaming SAX XLSX reader and schema validator (**~44 KB minified / ~14 KB gzipped**).
-  - Non-XLSX formats are packaged into **grouped plugins** (`textPlugin`, `xlsPlugin`, `markupPlugin`, `legacyPlugin`), keeping client bundles small and tree-shaken.
-  - An all-in-one preset (`spreadsheet-utils/full`) is available for zero-config multi-format support.
-- **16+ File Formats Supported**:
-  - **Excel**: `.xlsx` (Core streaming SAX), `.xls` (BIFF5/BIFF8 binary via `xlsPlugin`)
-  - **OpenDocument**: `.ods` (via `markupPlugin`)
-  - **Delimited Text**: `.csv`, `.tsv`, `.tab`, `.txt` (via `textPlugin`)
-  - **Databases**: `.dbf` (dBase III, IV, V, Visual FoxPro via `legacyPlugin`)
-  - **Legacy Spreadsheets**: Lotus 1-2-3 (`.wks`, `.wk1`, `.wk3`, `.wk4`, `.123`), `.dif` (Data Interchange Format), `.slk` / `.sylk` (Symbolic Link) (via `legacyPlugin`)
-  - **Markup & Web**: `.html`, `.htm` (HTML tables), `.xml` (Excel 2003 XML / SpreadsheetML) (via `markupPlugin`)
-  - **Apple**: `.numbers` (Apple Numbers documents via `legacyPlugin`)
-- **Styled XLSX Export & Roundtrip**:
-  - Integrated `writeSpreadsheet` and `writeXlsxFile` for generating styled `.xlsx` workbooks with custom fonts, colors, borders, alignments, column spans, and formatting.
-  - Supports converting raw rows, objects with schemas, multi-sheet workbooks, and TabularJS worksheets directly to XLSX.
-- **Low Memory & Zero JSZip**:
-  - Replaced JSZip (`~100 KB`, high memory) with `fflate` (`~8 KB`) across all ZIP operations (`.xlsx`, `.ods`, `.numbers`, and writer).
-  - Streaming SAX XML parsing (`saxen`) for `.xlsx`—never constructs giant in-memory XML DOM trees.
-- **Multi-Target Distribution**:
-  - **ESM** (`import` in Node.js 18+ and modern bundlers)
-  - **CommonJS** (`require` in Node.js)
-  - **Browser `<script>` tags** (Standalone IIFE bundles exposing global variables)
-- **TypeScript Support**:
-  - Comprehensive TypeScript declarations included (`index.d.ts`, `plugins.d.ts`, `write.d.ts`, `full.d.ts`).
-- **Upstream Synchronization**:
-  - Built-in CLI tool (`scripts/sync-upstream.js`) and tracking guide (`UPSTREAM.md`) to regularly inspect and sync updates from upstream repositories.
+- [Why spreadsheet-utils?](#why-spreadsheet-utils)
+  - [Architecture Comparison](#architecture-comparison)
+  - [Supported Formats Matrix](#supported-formats-matrix)
+- [Installation](#installation)
+- [Distribution Targets & Subpaths](#distribution-targets--subpaths)
+- [Quick Start](#quick-start)
+  - [1. Reading XLSX (Core)](#1-reading-xlsx-core)
+  - [2. Multi-Format Reading with Plugins](#2-multi-format-reading-with-plugins)
+  - [3. Isolated Scoped Reader (`createReader`)](#3-isolated-scoped-reader-createreader)
+  - [4. All-in-One Zero-Config Preset (`spreadsheet-utils/full`)](#4-all-in-one-zero-config-preset-spreadsheet-utilsfull)
+- [Streaming Row Consumer](#streaming-row-consumer)
+  - [`iterateSpreadsheet` Async Generator](#iteratespreadsheet-async-generator)
+  - [`onRow` Callback](#onrow-callback)
+- [Background Thread Offloading (`spreadsheet-utils/worker`)](#background-thread-offloading-spreadsheet-utilsworker)
+- [Security & Malicious Input Hardening](#security--malicious-input-hardening)
+- [Schema Mapping & Data Validation](#schema-mapping--data-validation)
+- [Styled Writer & Multi-Format Exporter](#styled-writer--multi-format-exporter)
+  - [Writing Styled XLSX Files](#writing-styled-xlsx-files)
+  - [Writing Objects with Schema](#writing-objects-with-schema)
+  - [Multi-Sheet Workbooks](#multi-sheet-workbooks)
+  - [Multi-Format Exporter (`writeCSV`, `writeTSV`, `writeHTML`, `writeJSON`)](#multi-format-exporter-writecsv-writetsv-writehtml-writejson)
+- [Browser `<script>` Tag Usage](#browser-script-tag-usage)
+- [CommonJS (`require`) Support](#commonjs-require-support)
+- [Interactive Browser Playground](#interactive-browser-playground)
+- [Complete API Reference](#complete-api-reference)
+  - [`readSpreadsheet(input, [options])`](#readspreadsheetinput-options)
+  - [`iterateSpreadsheet(input, [options])`](#iteratespreadsheetinput-options)
+  - [`readInWorker(input, [options])`](#readinworkerinput-options)
+  - [`createReader([plugins])`](#createreaderplugins)
+  - [`registerPlugin(...plugins)`](#registerpluginplugins)
+  - [`writeSpreadsheet(data, [options], [extraOptions])`](#writespreadsheetdata-options-extraoptions)
+  - [`writeCSV` / `writeTSV` / `writeHTML` / `writeJSON`](#writecsv--writetsv--writehtml--writejson)
+- [Upstream Synchronization & CI](#upstream-synchronization--ci)
+- [License](#license)
+
+---
+
+## Why spreadsheet-utils?
+
+Spreadsheet libraries in JavaScript typically force a difficult trade-off:
+1. **SheetJS (`xlsx`)**: Supports many formats, but has a large bundle footprint (~800 KB minified), high memory usage because it loads full DOM structures, and non-permissive dual licensing for commercial use.
+2. **`read-excel-file`**: Outstanding low-memory streaming SAX parser with declarative schema validation, but strictly limited to `.xlsx`.
+3. **`tabularjs`**: Impressive 16+ format parser suite, but lacks streaming row consumption, bundles `jszip` (~100 KB), and doesn't offer an integrated styled exporter.
+4. **`write-excel-file`**: Lightweight, beautiful styled XLSX generator, but separate from reading toolkits.
+
+**`spreadsheet-utils` combines the best of all worlds:**
+- **Modular & Tree-Shakable**: The core package is only **~44 KB minified (~14 KB gzipped)** containing the streaming SAX `.xlsx` reader and schema validator. Formats like CSV, XLS, ODS, Numbers, and DBF are packaged in grouped plugins so applications only load what they need.
+- **Zero JSZip**: JSZip (`~100 KB`, high memory) has been completely replaced with [`fflate`](https://github.com/101arrowz/fflate) (`~8 KB`, ultra-fast streaming inflate/deflate).
+- **Constant Memory Streaming**: Memory remains constant whether parsing 10 rows or 1,000,000 rows using `iterateSpreadsheet` or `options.onRow`.
+- **Security Hardened**: Built-in limits for uncompressed ZIP size, file size, rows, and columns prevent ZIP bombs and CPU exhaustion.
+- **Background Worker Ready**: Seamlessly offloads parsing to Web Workers in the browser or `node:worker_threads` in Node.js.
+- **Roundtrip Styled XLSX & Multi-Format Exporter**: Read any format, manipulate data, and export back to styled `.xlsx`, `.csv`, `.tsv`, `.html`, or `.json`.
+
+### Architecture Comparison
+
+| Feature | `spreadsheet-utils` | `read-excel-file` | `tabularjs` | `xlsx` (SheetJS) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Core Bundle Size (minified)** | **44 KB** | 42 KB | 280 KB | ~850 KB |
+| **ZIP Engine** | **`fflate` (~8 KB)** | `fflate` / `unzipper` | `jszip` (~100 KB) | Custom internal |
+| **XML Parsing** | **Streaming SAX (`saxen`)** | Streaming SAX | DOMParser / XMLDOM | Custom regex / SAX |
+| **Supported Formats** | **16+ formats** | 1 (`.xlsx`) | 16+ formats | 15+ formats |
+| **Plugin Architecture** | **Yes (Grouped plugins)** | No | Monolithic | Monolithic |
+| **Streaming Row Consumer** | **Yes (`iterateSpreadsheet`)** | Partial (raw SAX) | No | No |
+| **Schema Validation & Typing** | **Yes (Built-in)** | Yes | No | No |
+| **Styled XLSX Writer** | **Yes (`spreadsheet-utils/write`)** | No | No | Paid Pro feature |
+| **Multi-Format Exporter** | **Yes (CSV, TSV, HTML, JSON)** | No | No | Partial |
+| **Worker Offloader** | **Yes (`spreadsheet-utils/worker`)** | Manual | Manual | Manual |
+| **Browser Script Tag Bundle** | **Yes (Standalone IIFE)** | Yes | Yes | Yes |
+| **License** | **MIT** | MIT | MIT | Apache 2.0 / Commercial |
+
+---
+
+### Supported Formats Matrix
+
+| Category | Extensions | Underlying Format | Required Module / Plugin |
+| :--- | :--- | :--- | :--- |
+| **Excel Modern** | `.xlsx` | Office Open XML (SpreadsheetML) | **`spreadsheet-utils` (Core built-in)** |
+| **Excel Binary Legacy** | `.xls` | BIFF5 / BIFF8 Binary (Excel 97–2004) | `xlsPlugin` (`spreadsheet-utils/plugins`) |
+| **OpenDocument** | `.ods` | OpenDocument Spreadsheet (OASIS) | `markupPlugin` (`spreadsheet-utils/plugins`) |
+| **Delimited Text** | `.csv`, `.tsv`, `.tab`, `.txt` | RFC 4180 Delimited Text | `textPlugin` (`spreadsheet-utils/plugins`) |
+| **HTML Tables** | `.html`, `.htm` | HTML `<table>`, styles, formulas | `markupPlugin` (`spreadsheet-utils/plugins`) |
+| **XML Spreadsheet** | `.xml` | Microsoft SpreadsheetML 2003 | `markupPlugin` (`spreadsheet-utils/plugins`) |
+| **Databases** | `.dbf` | dBase III, IV, V, Visual FoxPro | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+| **Apple Spreadsheets** | `.numbers` | Apple Numbers document archives | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+| **Lotus 1-2-3** | `.wks`, `.wk1`, `.wk3`, `.wk4`, `.123` | Lotus 1-2-3 worksheet files | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+| **Interchange Formats** | `.dif` | Data Interchange Format | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+| **Symbolic Link** | `.slk`, `.sylk` | Microsoft SYLK format | `legacyPlugin` (`spreadsheet-utils/plugins`) |
 
 ---
 
@@ -45,44 +111,54 @@ npm install spreadsheet-utils
 
 ---
 
-## Package Targets & Entry Points
+## Distribution Targets & Subpaths
 
-| Subpath / Target | Description | Bundle Size (Browser Minified) |
+`spreadsheet-utils` provides first-class support for ES Modules (`import`), CommonJS (`require`), TypeScript types, and direct browser `<script>` tag inclusion:
+
+| Subpath / Target | Description | Browser Minified Size |
 | :--- | :--- | :--- |
-| `spreadsheet-utils` | **Core Reader**: Streaming XLSX reader, schema validator, plugin registry | **44 KB** (~14 KB gzip) |
-| `spreadsheet-utils/plugins` | **Format Plugins**: `textPlugin`, `xlsPlugin`, `markupPlugin`, `legacyPlugin`, `allPlugins` | **92 KB** |
-| `spreadsheet-utils/write` | **Styled Writer & Multi-Exporter**: `writeSpreadsheet`, `writeXlsxFile`, `writeCSV`, `writeTSV`, `writeHTML`, `writeJSON` | **73 KB** |
-| `spreadsheet-utils/full` | **All-in-One**: Core reader + all format plugins pre-registered + full writer/exporter | **192 KB** |
-| `spreadsheet-utils/worker` | **Worker Offloader**: `readInWorker` (Node `worker_threads` & Browser Web Workers) | Zero-setup background thread |
+| **`spreadsheet-utils`** | **Core Reader**: SAX streaming XLSX reader, schema validator, plugin registry | **44 KB** (~14 KB gzip) |
+| **`spreadsheet-utils/plugins`** | **Format Plugins**: `textPlugin`, `xlsPlugin`, `markupPlugin`, `legacyPlugin`, `allPlugins` | **92 KB** |
+| **`spreadsheet-utils/write`** | **Styled Writer & Exporter**: `writeSpreadsheet`, `writeXlsxFile`, `writeCSV`, `writeTSV`, `writeHTML`, `writeJSON` | **73 KB** |
+| **`spreadsheet-utils/full`** | **All-in-One**: Core reader + all format plugins pre-registered + styled writer | **192 KB** (~60 KB gzip) |
+| **`spreadsheet-utils/worker`** | **Worker Offloader**: `readInWorker` for background thread processing | Zero-setup worker thread |
 
 ---
 
 ## Quick Start
 
-### 1. Core XLSX Reading (read-excel-file style)
+### 1. Reading XLSX (Core)
+
+By default, the core package parses `.xlsx` files with zero plugin registration needed:
 
 ```javascript
 import { readSpreadsheet } from 'spreadsheet-utils';
 
-// Reads XLSX directly into a 2D array of rows
-const rows = await readSpreadsheet('data.xlsx');
+// Read an XLSX file into a 2D array of rows
+const rows = await readSpreadsheet('financials.xlsx');
 console.log(rows);
-// [ ['Name', 'Age'], ['Alice', 30], ['Bob', 25] ]
+// Output:
+// [
+//   ['Quarter', 'Revenue', 'Profit'],
+//   ['Q1', 120000, 34000],
+//   ['Q2', 145000, 42000]
+// ]
 ```
 
-### 2. Using Grouped Plugins for Other Formats
+### 2. Multi-Format Reading with Plugins
 
-If you attempt to read a non-XLSX format without its plugin registered, `spreadsheet-utils` provides a clear diagnostic message indicating the required plugin:
+Non-XLSX formats are loaded via **grouped plugins**, keeping your production bundle lean. If you attempt to parse a format without registering its plugin, `spreadsheet-utils` throws a clear diagnostic error naming the exact plugin required:
 
 ```javascript
 import { readSpreadsheet, registerPlugin } from 'spreadsheet-utils';
-import { textPlugin } from 'spreadsheet-utils/plugins';
+import { textPlugin, xlsPlugin } from 'spreadsheet-utils/plugins';
 
-// Register CSV, TSV, and TXT support
-registerPlugin(textPlugin);
+// Enable CSV, TSV, and legacy Excel (.xls)
+registerPlugin(textPlugin, xlsPlugin);
 
-const rows = await readSpreadsheet('report.csv');
-console.log(rows);
+// Now read CSV or legacy XLS transparently
+const csvRows = await readSpreadsheet('users.csv');
+const xlsRows = await readSpreadsheet('archive.xls');
 ```
 
 #### Available Grouped Plugins
@@ -90,34 +166,39 @@ console.log(rows);
 ```javascript
 import {
   textPlugin,    // .csv, .tsv, .tab, .txt
-  xlsPlugin,     // .xls (Excel 97-2004 BIFF5/BIFF8 + CFB + PTG decoder)
+  xlsPlugin,     // .xls (BIFF5/BIFF8 binary Excel 97-2004 + CFB + PTG formula decoder)
   markupPlugin,  // .ods (OpenDocument), .html/.htm (HTML tables), .xml (SpreadsheetML 2003)
   legacyPlugin,  // .dbf (dBase), .dif, .slk, Lotus 1-2-3 (.wks/.wk1/.wk3/.wk4/.123), .numbers
-  allPlugins     // Array of all 4 plugins
+  allPlugins     // Array containing all 4 plugins
 } from 'spreadsheet-utils/plugins';
+
+// Register all at once:
+registerPlugin(...allPlugins);
 ```
 
 ### 3. Isolated Scoped Reader (`createReader`)
 
-To avoid mutating the global registry when different components require different formats:
+In multi-tenant or modular applications where you don't want to mutate the global plugin registry:
 
 ```javascript
 import { createReader } from 'spreadsheet-utils';
-import { textPlugin, xlsPlugin } from 'spreadsheet-utils/plugins';
+import { textPlugin } from 'spreadsheet-utils/plugins';
 
-const reader = createReader([textPlugin, xlsPlugin]);
-const rows = await reader('financials.xls');
+// Scoped reader with only textPlugin registered
+const csvReader = createReader([textPlugin]);
+
+const rows = await csvReader('data.csv');
 ```
 
-### 4. Zero-Config All-in-One Preset (`spreadsheet-utils/full`)
+### 4. All-in-One Zero-Config Preset (`spreadsheet-utils/full`)
 
-If bundle size is not an issue and you want all 16+ formats and the writer ready out of the box:
+If bundle size is not a constraint and you want all 16+ formats and the styled writer pre-loaded:
 
 ```javascript
 import { readSpreadsheet, writeSpreadsheet } from 'spreadsheet-utils/full';
 
-// Reads any supported format automatically
-const rows = await readSpreadsheet('archive.ods');
+// Reads any format automatically
+const rows = await readSpreadsheet('data.numbers');
 
 // Writes styled XLSX
 await writeSpreadsheet(rows, 'output.xlsx');
@@ -125,74 +206,98 @@ await writeSpreadsheet(rows, 'output.xlsx');
 
 ---
 
-## Streaming Row Consumer (`iterateSpreadsheet` & `onRow`)
+## Streaming Row Consumer
 
-For massive spreadsheets (hundreds of thousands of rows), holding the entire 2D matrix in RAM is unnecessary. `spreadsheet-utils` provides two ultra-low memory streaming APIs:
+When parsing huge spreadsheets (e.g. hundreds of thousands or millions of rows), buffering the entire 2D matrix in memory can cause out-of-memory errors. `spreadsheet-utils` provides two streaming APIs:
 
-### 1. `iterateSpreadsheet` Async Generator
-Yields rows one-by-one with constant heap memory usage:
+### `iterateSpreadsheet` Async Generator
+
+Yields rows asynchronously as they are parsed from the underlying XML SAX stream. Memory usage remains constant throughout the entire read:
 
 ```javascript
 import { iterateSpreadsheet } from 'spreadsheet-utils';
 
-// Heap memory remains constant whether reading 100 rows or 1,000,000 rows
+// Constant heap memory regardless of file size
 for await (const row of iterateSpreadsheet('massive-dataset.xlsx')) {
   console.log('Streamed row:', row);
+  
+  // Early termination: breaking immediately stops XML stream parsing!
+  if (row[0] === 'STOP') {
+    break;
+  }
 }
 ```
 
-### 2. `onRow` Callback
-Process each row as it is parsed without buffering:
+### `onRow` Callback
+
+Process each row on-the-fly without accumulating rows in memory:
 
 ```javascript
 import { readSpreadsheet } from 'spreadsheet-utils';
 
-let totalRevenue = 0;
+let totalSum = 0;
 
-await readSpreadsheet('sales.xlsx', {
+await readSpreadsheet('transactions.xlsx', {
   onRow: (row, rowIndex) => {
     if (rowIndex > 0) { // Skip header
-      totalRevenue += Number(row[2] || 0);
+      totalSum += Number(row[2] || 0);
     }
   }
 });
 
-console.log('Total Revenue:', totalRevenue);
+console.log('Total:', totalSum);
 ```
 
 ---
 
-## Security & Input Limits Hardening
+## Background Thread Offloading (`spreadsheet-utils/worker`)
 
-Defend against **ZIP bombs**, deeply nested XML attacks, or accidental out-of-memory crashes from hostile user uploads:
+Offload heavy spreadsheet parsing off the main thread:
+- **In Node.js**: Uses `node:worker_threads`.
+- **In the Browser**: Uses the Web Worker API.
+
+```javascript
+import { readInWorker } from 'spreadsheet-utils/worker';
+
+// Parsing runs in a background thread; UI / event-loop never freezes
+const rows = await readInWorker('heavy-report.xlsx');
+console.log('Parsed rows:', rows.length);
+```
+
+---
+
+## Security & Malicious Input Hardening
+
+Spreadsheet parsers are common vectors for Denial-of-Service attacks (ZIP bombs, 10-million column allocations, or infinite loops). `spreadsheet-utils` provides configurable guardrails:
 
 ```javascript
 import { readSpreadsheet } from 'spreadsheet-utils';
 
-const rows = await readSpreadsheet(userUploadBuffer, {
-  // Enforce max physical file size (e.g., 20 MB)
+const rows = await readSpreadsheet(userUploadedBuffer, {
+  // 1. Max physical file size in bytes (e.g., 20 MB)
   maxFileSize: 20 * 1024 * 1024,
 
-  // Guard against ZIP decompression bombs (e.g., max 50 MB uncompressed)
+  // 2. Max decompressed size for ZIP-based formats (.xlsx, .ods, .numbers)
+  // Stops decompression bombs before memory is exhausted!
   maxUncompressedSize: 50 * 1024 * 1024,
 
-  // Limit parsed dimensions
+  // 3. Dimensional limits
   maxRows: 10000,
   maxColumns: 100,
 
-  // Throw an error if bounds are exceeded (defaults to true)
+  // 4. Behavior when limit exceeded: true throws error; false truncates cleanly
   throwOnLimit: true
 });
 ```
 
 ---
 
-## Schema Mapping & Validation
+## Schema Mapping & Data Validation
 
-Extract typed JavaScript objects with schema validation across **all** formats:
+Extract typed JavaScript objects directly from spreadsheet rows with full validation:
 
 ```javascript
-import { readSpreadsheet, registerPlugin, Integer, Email } from 'spreadsheet-utils';
+import { readSpreadsheet, registerPlugin, Integer, Email, URL } from 'spreadsheet-utils';
 import { textPlugin } from 'spreadsheet-utils/plugins';
 
 registerPlugin(textPlugin);
@@ -217,62 +322,106 @@ const schema = {
     prop: 'joinedAt',
     type: Date,
     required: false
+  },
+  'STATUS': {
+    prop: 'status',
+    type: String,
+    oneOf: ['active', 'inactive', 'pending']
   }
 };
 
 const { rows, errors } = await readSpreadsheet('users.csv', { schema });
 
 if (errors.length > 0) {
-  console.warn('Validation issues:', errors);
+  console.warn('Validation errors:', errors);
 }
 
 console.log(rows);
-// [ { id: 1, name: 'Alice', email: 'alice@example.com', joinedAt: 2024-01-15T... } ]
+// [
+//   { id: 101, name: 'Alice Smith', email: 'alice@example.com', joinedAt: 2024-01-15T00:00:00.000Z, status: 'active' },
+//   { id: 102, name: 'Bob Jones', email: 'bob@example.com', joinedAt: 2024-02-01T00:00:00.000Z, status: 'pending' }
+// ]
 ```
+
+### Schema Property Options
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `prop` | `string` | Target object property name |
+| `type` | `Function` | Type constructor (`String`, `Number`, `Boolean`, `Date`, `Integer`, `Email`, `URL`) or custom parsing function |
+| `required` | `boolean \| (row) => boolean` | Whether the cell is required. Supports conditional requirements based on row data |
+| `validate` | `(value) => void` | Custom validator function. Throw an error with a custom message if invalid |
+| `parse` | `(value) => any` | Custom value parser / transformer |
+| `oneOf` | `any[]` | Array of allowed values |
 
 ---
 
-## Styled XLSX Writer (`spreadsheet-utils/write`)
+## Styled Writer & Multi-Format Exporter
 
-Export spreadsheets with cell styling, custom column widths, and schema mapping:
+Export styled spreadsheets with custom colors, fonts, borders, column widths, and format masks:
 
 ```javascript
 import { writeSpreadsheet } from 'spreadsheet-utils/write';
 
-// 1. Grid of styled cells
 const data = [
   [
-    { value: 'Product', fontWeight: 'bold', backgroundColor: '#e2e8f0' },
-    { value: 'Price', fontWeight: 'bold', backgroundColor: '#e2e8f0' }
+    { value: 'Product', fontWeight: 'bold', backgroundColor: '#e2e8f0', align: 'left' },
+    { value: 'Units Sold', fontWeight: 'bold', backgroundColor: '#e2e8f0', align: 'right' },
+    { value: 'Price', fontWeight: 'bold', backgroundColor: '#e2e8f0', align: 'right' }
   ],
   [
-    { value: 'Widget', type: String },
-    { value: 29.99, type: Number, format: '$#,##0.00' }
+    { value: 'Wireless Headphones', type: String },
+    { value: 1250, type: Number, format: '#,##0' },
+    { value: 89.99, type: Number, format: '$#,##0.00' }
+  ],
+  [
+    { value: 'Mechanical Keyboard', type: String },
+    { value: 640, type: Number, format: '#,##0' },
+    { value: 129.50, type: Number, format: '$#,##0.00' }
   ]
 ];
 
-// Write to file (Node.js)
-await writeSpreadsheet(data, 'pricing.xlsx');
+// Write directly to file in Node.js
+await writeSpreadsheet(data, 'sales.xlsx');
 
-// Or return Buffer in Node / Blob in Browser
+// Or return a Buffer (in Node.js) or Blob (in Browser)
 const buffer = await writeSpreadsheet(data, { buffer: true });
 ```
+
+### Cell Styling Properties
+
+| Property | Values / Examples | Description |
+| :--- | :--- | :--- |
+| `fontWeight` | `'bold'`, `'normal'` | Font weight |
+| `fontStyle` | `'italic'`, `'normal'` | Font style |
+| `fontSize` | `12`, `14`, `18` | Font size in points |
+| `fontFamily` | `'Arial'`, `'Calibri'` | Font family name |
+| `textColor` | `'#ffffff'`, `'#2563eb'` | Hex text color |
+| `backgroundColor` | `'#f1f5f9'`, `'#dbeafe'` | Hex fill background color |
+| `borderColor` | `'#cccccc'`, `'#000000'` | Border color |
+| `borderStyle` | `'thin'`, `'medium'`, `'thick'`, `'dashed'`, `'dotted'`, `'double'` | Border line style |
+| `align` | `'left'`, `'center'`, `'right'` | Horizontal alignment |
+| `verticalAlign` | `'top'`, `'center'`, `'bottom'` | Vertical alignment |
+| `wrap` | `true`, `false` | Text wrapping inside cell |
+| `format` | `'#,##0'`, `'$#,##0.00'`, `'yyyy-mm-dd'` | Excel number or date format mask |
+| `columnSpan` | `2`, `3` | Number of columns to merge |
+| `rowSpan` | `2`, `3` | Number of rows to merge |
 
 ### Writing Objects with Schema
 
 ```javascript
 const users = [
-  { id: 1, name: 'Alice', balance: 1450.75 },
-  { id: 2, name: 'Bob', balance: 920.00 }
+  { id: 1, name: 'Alice Smith', balance: 1450.75 },
+  { id: 2, name: 'Bob Jones', balance: 920.00 }
 ];
 
 const schema = {
-  id: { column: 'ID', type: Number, width: 10 },
-  name: { column: 'Name', type: String, width: 25 },
-  balance: { column: 'Balance', type: Number, format: '$#,##0.00', width: 15 }
+  id: { column: 'User ID', type: Number, width: 12 },
+  name: { column: 'Customer Name', type: String, width: 25 },
+  balance: { column: 'Outstanding Balance', type: Number, format: '$#,##0.00', width: 20 }
 };
 
-await writeSpreadsheet(users, { schema, filePath: 'users.xlsx' });
+await writeSpreadsheet(users, { schema, filePath: 'customers.xlsx' });
 ```
 
 ### Multi-Sheet Workbooks
@@ -300,71 +449,40 @@ await writeSpreadsheet(sheets, 'quarterly-report.xlsx');
 
 ### Multi-Format Exporter (`writeCSV`, `writeTSV`, `writeHTML`, `writeJSON`)
 
-In addition to styled `.xlsx`, export spreadsheet data directly to standard web and text formats:
+In addition to `.xlsx`, export data to standard text and web formats:
 
 ```javascript
 import { writeCSV, writeTSV, writeHTML, writeJSON, writeSpreadsheet } from 'spreadsheet-utils/write';
 
 const data = [
-  ['Product', 'Category', 'Price'],
-  ['Widget A', 'Hardware', 29.99],
-  ['Widget B', 'Hardware', 49.99]
+  ['ID', 'Name', 'Role'],
+  [1, 'Alice', 'Admin'],
+  [2, 'Bob', 'Member']
 ];
 
 // RFC 4180 compliant CSV
-await writeCSV(data, 'catalog.csv');
+await writeCSV(data, 'export.csv');
 
 // Tab-separated TSV
-await writeTSV(data, 'catalog.tsv');
+await writeTSV(data, 'export.tsv');
 
-// HTML <table> or full HTML document with inline styles
-await writeHTML(data, { filePath: 'catalog.html', fullDocument: true });
+// HTML <table> with inline styles or complete standalone document
+await writeHTML(data, { filePath: 'table.html', fullDocument: true });
 
-// JSON array of objects or 2D grid
-await writeJSON(data, { filePath: 'catalog.json', asObjects: true });
+// JSON array of objects or 2D matrix
+await writeJSON(data, { filePath: 'data.json', asObjects: true });
 
 // Or let writeSpreadsheet auto-route by file extension:
-await writeSpreadsheet(data, 'export.csv');
-await writeSpreadsheet(data, 'export.html');
-```
-
----
-
-## Background Worker Offloader (`spreadsheet-utils/worker`)
-
-Offload CPU-intensive spreadsheet parsing to background threads to prevent UI freezes in browsers or event-loop stalls in Node.js servers:
-
-```javascript
-import { readInWorker } from 'spreadsheet-utils/worker';
-
-// In Node.js: Runs inside node:worker_threads
-// In Browser: Runs inside a Web Worker
-const rows = await readInWorker('large-report.xlsx');
-console.log('Parsed off-thread:', rows.length, 'rows');
-```
-
----
-
-## Interactive Browser Playground Demo
-
-An interactive zero-setup demo is included in `examples/index.html`. You can open it directly in any browser:
-
-- **Drag-and-Drop Parsing**: Drop any `.xlsx`, `.xls`, `.ods`, `.csv`, `.numbers`, `.dbf`, or `.html` file.
-- **Dynamic Table Preview**: Inspect data with formatting, headers, row counters, and file metrics.
-- **Multi-Format Export**: Convert uploaded data into `.xlsx`, `.csv`, `.html`, or `.json` on the fly.
-- **Sample Data Generator**: Test the toolkit with a single click.
-
-To launch locally:
-```bash
-npx serve .
-# Open http://localhost:3000/examples/
+await writeSpreadsheet(data, 'report.csv');
+await writeSpreadsheet(data, 'report.html');
+await writeSpreadsheet(data, 'report.json');
 ```
 
 ---
 
 ## Browser `<script>` Tag Usage
 
-Ready-to-use standalone bundles are located in `dist/browser/`:
+Standalone browser bundles are available in `dist/browser/`. Include them directly via `<script>` tag:
 
 ### Core Reader
 
@@ -372,8 +490,8 @@ Ready-to-use standalone bundles are located in `dist/browser/`:
 <script src="dist/browser/spreadsheet-utils.min.js"></script>
 <script>
   // Exposes window.spreadsheetUtils
-  const input = document.querySelector('input[type="file"]');
-  input.addEventListener('change', async (e) => {
+  const fileInput = document.getElementById('myFile');
+  fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     const rows = await window.spreadsheetUtils.readSpreadsheet(file);
     console.log(rows);
@@ -387,12 +505,12 @@ Ready-to-use standalone bundles are located in `dist/browser/`:
 <script src="dist/browser/spreadsheet-utils-full.min.js"></script>
 <script>
   // Exposes window.spreadsheetUtilsFull
-  async function handleFile(file) {
-    // Reads any format (XLSX, CSV, ODS, Numbers, etc.)
+  async function processSpreadsheet(file) {
+    // Reads any format: XLSX, XLS, ODS, CSV, Numbers, DBF, etc.
     const rows = await window.spreadsheetUtilsFull.readSpreadsheet(file);
 
-    // Write & trigger browser download
-    await window.spreadsheetUtilsFull.writeSpreadsheet(rows, 'exported.xlsx');
+    // Write back and automatically trigger a browser download
+    await window.spreadsheetUtilsFull.writeSpreadsheet(rows, 'converted.xlsx');
   }
 </script>
 ```
@@ -403,10 +521,10 @@ Ready-to-use standalone bundles are located in `dist/browser/`:
 
 ```javascript
 const { readSpreadsheet, registerPlugin } = require('spreadsheet-utils');
-const { textPlugin } = require('spreadsheet-utils/plugins');
+const { textPlugin, xlsPlugin } = require('spreadsheet-utils/plugins');
 const { writeSpreadsheet } = require('spreadsheet-utils/write');
 
-registerPlugin(textPlugin);
+registerPlugin(textPlugin, xlsPlugin);
 
 async function run() {
   const rows = await readSpreadsheet('data.csv');
@@ -417,33 +535,153 @@ run();
 
 ---
 
-## Upstream Synchronization
+## Interactive Browser Playground
 
-`spreadsheet-utils` includes automated tooling and CI workflows to track and merge updates from its base repositories (`read-excel-file`, `tabularjs`, and `write-excel-file`):
+An interactive demo is included in [`examples/index.html`](file:///home/illimitable/Documents/vibe-projects/spreadsheet-utils/examples/index.html):
+- **Drag-and-Drop Parsing**: Drop any `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`, `.numbers`, `.dbf`, or `.html` file.
+- **Data Preview Table**: Sticky headers, column inspection, row counters, and format detection badge.
+- **Multi-Format Instant Export**: Download parsed data as `.xlsx`, `.csv`, `.html`, or `.json`.
+- **Sample Data Generator**: Test the toolkit in one click.
 
-- **Automated GitHub Actions (`.github/workflows/upstream-sync.yml`)**:
-  - Runs automatically every Monday at 00:00 UTC (and via manual `workflow_dispatch`).
-  - Checks npm registry for newer upstream versions.
-  - Automatically creates a GitHub issue with details if an upstream library publishes a new release.
-
-- **Manual CLI Tooling**:
+To run it locally:
 ```bash
-# Check status and file mappings
+npx serve .
+# Open http://localhost:3000/examples/
+```
+
+---
+
+## Complete API Reference
+
+### `readSpreadsheet(input, [options])`
+
+Parses a spreadsheet from a file path, Buffer, Uint8Array, ArrayBuffer, ReadableStream, or browser File/Blob.
+
+```typescript
+function readSpreadsheet(input: SpreadsheetInput, options?: CommonOptions): Promise<Row[]>;
+function readSpreadsheet<T>(input: SpreadsheetInput, options: OptionsWithSchema<T>): Promise<ParsedSchemaResult<T>>;
+function readSpreadsheet(input: SpreadsheetInput, options: { format: 'tabular' }): Promise<TabularSpreadsheet>;
+function readSpreadsheet(input: SpreadsheetInput, options: { allSheets: true }): Promise<SheetEntry[]>;
+```
+
+#### Options:
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sheet` | `string \| number` | `1` | Sheet name or 1-based sheet index to parse |
+| `allSheets` | `boolean` | `false` | When `true`, returns an array of `{ name, data }` for all sheets |
+| `format` | `'rows' \| 'tabular'` | `'rows'` | When `'tabular'`, returns TabularJS workbook structure with styles/merges |
+| `schema` | `Schema` | `undefined` | Schema object for mapping rows to typed objects |
+| `onRow` | `(row: Row, index: number) => void` | `undefined` | Callback invoked as each row is parsed |
+| `delimiter` | `string` | auto | Delimiter character for CSV/TSV |
+| `tableIndex` | `number` | `0` | 0-based index of `<table>` when parsing HTML |
+| `dateFormat` | `string` | auto | Date format mask |
+| `trim` | `boolean` | `false` | Trim whitespace from string cell values |
+| `maxRows` | `number` | `undefined` | Maximum number of rows to parse |
+| `maxColumns` | `number` | `undefined` | Maximum number of columns per row |
+| `maxFileSize` | `number` | `undefined` | Maximum input file size in bytes |
+| `maxUncompressedSize` | `number` | `undefined` | Maximum uncompressed ZIP extraction size (ZIP bomb guard) |
+| `throwOnLimit` | `boolean` | `true` | Throw an error when limit is exceeded (if `false`, truncates cleanly) |
+
+---
+
+### `iterateSpreadsheet(input, [options])`
+
+Returns an asynchronous generator that yields rows one-by-one with constant heap memory usage.
+
+```typescript
+function iterateSpreadsheet(input: SpreadsheetInput, options?: CommonOptions): AsyncGenerator<Row, void, unknown>;
+```
+
+---
+
+### `readInWorker(input, [options])`
+
+Offloads spreadsheet parsing to a background thread (`node:worker_threads` in Node.js, Web Worker in browser).
+
+```typescript
+function readInWorker(input: SpreadsheetInput, options?: CommonOptions): Promise<Row[]>;
+function readInWorker<T>(input: SpreadsheetInput, options: OptionsWithSchema<T>): Promise<ParsedSchemaResult<T>>;
+```
+
+---
+
+### `createReader([plugins])`
+
+Creates a scoped, isolated reader instance with its own plugin registry.
+
+```typescript
+function createReader(plugins?: SpreadsheetPlugin | SpreadsheetPlugin[]): ScopedReader;
+```
+
+---
+
+### `registerPlugin(...plugins)`
+
+Registers one or more plugins into the global registry.
+
+```typescript
+function registerPlugin(...plugins: SpreadsheetPlugin[]): void;
+function unregisterPlugin(target?: string | SpreadsheetPlugin): void;
+function isPluginRegistered(name: string): boolean;
+```
+
+---
+
+### `writeSpreadsheet(data, [options], [extraOptions])`
+
+Generates a spreadsheet. Automatically routes between `.xlsx`, `.csv`, `.tsv`, `.html`, and `.json` based on file extension or `options.format`.
+
+```typescript
+function writeSpreadsheet(
+  data: WriteGrid | Record<string, any>[] | SheetSpec[] | { worksheets: any[] },
+  options?: WriteSheetOptions | string,
+  extraOptions?: any
+): Promise<Uint8Array | Buffer | Blob | string | void>;
+```
+
+---
+
+### `writeCSV` / `writeTSV` / `writeHTML` / `writeJSON`
+
+Dedicated format serializes:
+
+```typescript
+function writeCSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+function writeTSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+function writeHTML(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+function writeJSON(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+```
+
+---
+
+## Upstream Synchronization & CI
+
+`spreadsheet-utils` maintains compatibility with its upstream base projects (`read-excel-file`, `tabularjs`, and `write-excel-file`):
+
+- **Automated GitHub Actions ([`.github/workflows/upstream-sync.yml`](file:///home/illimitable/Documents/vibe-projects/spreadsheet-utils/.github/workflows/upstream-sync.yml))**:
+  - Automatically runs every Monday at 00:00 UTC and on manual dispatch.
+  - Queries npm/GitLab registries for newer upstream releases.
+  - Runs full matrix test verification across Node 18, 20, and 22.
+
+- **Maintenance CLI Scripts**:
+```bash
+# Check upstream releases
 npm run sync:check
 
-# Clone an upstream repository to .upstream-staging/ for diff inspection
+# Clone upstream repo for diff comparison
 npm run sync:pull read-excel-file
 npm run sync:pull tabularjs
 npm run sync:pull write-excel-file
 
-# Verify build and test suite
+# Rebuild bundles and run verification
 npm run sync:verify
 ```
 
-See [`UPSTREAM.md`](./UPSTREAM.md) for full maintenance guidelines.
+See [`UPSTREAM.md`](file:///home/illimitable/Documents/vibe-projects/spreadsheet-utils/UPSTREAM.md) for full maintenance guidelines.
 
 ---
 
 ## License
 
-MIT
+[MIT](file:///home/illimitable/Documents/vibe-projects/spreadsheet-utils/LICENSE)
