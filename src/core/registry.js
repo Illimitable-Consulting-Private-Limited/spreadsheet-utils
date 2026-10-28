@@ -3,8 +3,9 @@
  * Allows extending the core XLSX reader with additional format groups.
  */
 
-// Global registry of format handlers and sniffers
+// Global registry of format handlers, writers and sniffers
 const registeredParsers = new Map();
+const registeredWriters = new Map();
 const registeredSniffers = new Set();
 const pluginNames = new Set();
 const pluginsMap = new Map();
@@ -51,6 +52,21 @@ export function registerPlugin(...plugins) {
         if (typeof plugin.detect === 'function') {
             registeredSniffers.add(plugin.detect);
         }
+        if (typeof plugin.write === 'function') {
+            const writeExts = Array.isArray(plugin.writeExtensions)
+                ? plugin.writeExtensions
+                : (Array.isArray(plugin.extensions) ? plugin.extensions : []);
+            for (const ext of writeExts) {
+                registeredWriters.set(ext.toLowerCase(), plugin.write);
+            }
+        }
+        if (plugin.writers && typeof plugin.writers === 'object') {
+            for (const [ext, writerFn] of Object.entries(plugin.writers)) {
+                if (typeof writerFn === 'function') {
+                    registeredWriters.set(ext.toLowerCase(), writerFn);
+                }
+            }
+        }
     }
 }
 
@@ -61,6 +77,7 @@ export function registerPlugin(...plugins) {
 export function unregisterPlugin(target) {
     if (!target) {
         registeredParsers.clear();
+        registeredWriters.clear();
         registeredSniffers.clear();
         pluginNames.clear();
         pluginsMap.clear();
@@ -76,6 +93,17 @@ export function unregisterPlugin(target) {
     if (plugin && plugin.extensions) {
         for (const ext of plugin.extensions) {
             registeredParsers.delete(ext.toLowerCase());
+            registeredWriters.delete(ext.toLowerCase());
+        }
+    }
+    if (plugin && plugin.writeExtensions) {
+        for (const ext of plugin.writeExtensions) {
+            registeredWriters.delete(ext.toLowerCase());
+        }
+    }
+    if (plugin && plugin.writers) {
+        for (const ext of Object.keys(plugin.writers)) {
+            registeredWriters.delete(ext.toLowerCase());
         }
     }
     if (plugin && plugin.detect) {
@@ -95,6 +123,20 @@ export function getParserForExtension(ext, localRegistry) {
         return localRegistry.get(key);
     }
     return registeredParsers.get(key) || null;
+}
+
+/**
+ * Get registered writer for a given extension.
+ * @param {string} ext
+ * @param {Map} [localRegistry]
+ * @returns {Function|null}
+ */
+export function getWriterForExtension(ext, localRegistry) {
+    const key = (ext || '').toLowerCase().replace(/^\./, '');
+    if (localRegistry && localRegistry.has(key)) {
+        return localRegistry.get(key);
+    }
+    return registeredWriters.get(key) || null;
 }
 
 /**
@@ -126,14 +168,20 @@ export function createMissingPluginError(ext, fileName) {
     const key = (ext || '').toLowerCase().replace(/^\./, '');
     const mapping = KNOWN_PLUGIN_MAPPINGS[key];
     if (mapping) {
-        return new Error(
+        const err = new Error(
             `File format "${key}" requires the "${mapping.plugin}". ` +
-            `Register it before reading:\n\n` +
+            `Register it before reading or writing:\n\n` +
             `  import { ${mapping.plugin} } from '${mapping.importPath}';\n` +
             `  registerPlugin(${mapping.plugin});\n`
         );
+        err.code = 'ERR_PLUGIN_REQUIRED';
+        err.plugin = mapping.plugin;
+        err.format = key;
+        return err;
     }
-    return new Error(`Unsupported file type: ${ext || fileName || '(unknown)'}`);
+    const err = new Error(`Unsupported file type: ${ext || fileName || '(unknown)'}`);
+    err.code = 'ERR_UNSUPPORTED_FORMAT';
+    return err;
 }
 
 /**

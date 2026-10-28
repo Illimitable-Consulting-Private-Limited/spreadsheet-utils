@@ -30,9 +30,16 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var plugins_exports = {};
 __export(plugins_exports, {
   allPlugins: () => allPlugins,
+  createDBF: () => createDBF,
+  createODS: () => createODS,
+  createXLS: () => createXLS,
+  dbfPlugin: () => dbfPlugin,
+  getWriterForExtension: () => getWriterForExtension,
   isPluginRegistered: () => isPluginRegistered,
   legacyPlugin: () => legacyPlugin,
   markupPlugin: () => markupPlugin,
+  normalizeSchemaToDbfFields: () => normalizeSchemaToDbfFields,
+  odsPlugin: () => odsPlugin,
   parseAllHTMLTables: () => parseAllHTMLTables,
   parseCSVFile: () => parseCSVFile,
   parseCSVString: () => parseCSVString,
@@ -50,6 +57,9 @@ __export(plugins_exports, {
   registerPlugin: () => registerPlugin,
   textPlugin: () => textPlugin,
   unregisterPlugin: () => unregisterPlugin,
+  writeDBF: () => writeDBF,
+  writeODS: () => writeODS,
+  writeXLS: () => writeXLS,
   xlsPlugin: () => xlsPlugin
 });
 module.exports = __toCommonJS(plugins_exports);
@@ -786,7 +796,7 @@ function createEntryObject(cfb, index) {
     };
   }
   let content;
-  if (entry.size < cfb.header.miniStreamCutoff) {
+  if (entry.size < cfb.header.miniStreamCutoff && cfb.miniStream.length > 0) {
     content = readMiniChain(
       cfb.miniStream,
       entry.startSector,
@@ -2531,11 +2541,9 @@ function styleToCss(style) {
       css.push(`background-color: ${excelDefaultPalette[bgColorIdx]}`);
     }
   }
-  if (style.font && style.font.color) {
-    const colorIdx = style.font.color;
-    if (colorIdx >= 0 && colorIdx < excelDefaultPalette.length) {
-      css.push(`color: ${excelDefaultPalette[colorIdx]}`);
-    }
+  const fontColorIdx = style.font?.color !== void 0 ? style.font.color : style.font?.colorIndex;
+  if (fontColorIdx !== void 0 && fontColorIdx >= 0 && fontColorIdx < excelDefaultPalette.length) {
+    css.push(`color: ${excelDefaultPalette[fontColorIdx]}`);
   }
   if (style.borders) {
     if (style.borders.left) css.push("border-left: 1px solid #000");
@@ -2764,10 +2772,1581 @@ async function parseXLS(input, options = {}) {
   }, input, options);
 }
 
+// src/write/xls.js
+var import_node_fs3 = __toESM(require("node:fs"), 1);
+
+// src/write/ods.js
+var import_node_fs2 = __toESM(require("node:fs"), 1);
+var import_fflate = require("fflate");
+
+// src/write/dbf.js
+var import_node_fs = __toESM(require("node:fs"), 1);
+function encodeString(str, encoding = "utf-8") {
+  if (str === null || str === void 0) {
+    return new Uint8Array(0);
+  }
+  const enc = String(encoding || "utf-8").toLowerCase().replace("-", "");
+  if (typeof Buffer !== "undefined") {
+    const nodeEnc = enc === "latin1" || enc === "iso88591" ? "latin1" : enc === "ascii" ? "ascii" : "utf8";
+    return Buffer.from(String(str), nodeEnc);
+  }
+  if (enc === "latin1" || enc === "iso88591" || enc === "ascii") {
+    const s = String(str);
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) {
+      bytes[i] = s.charCodeAt(i) & 255;
+    }
+    return bytes;
+  }
+  return new TextEncoder().encode(String(str));
+}
+function sanitizeDbfFieldName(rawName, index = 0, existingNames = /* @__PURE__ */ new Set()) {
+  let name = String(rawName || "").trim();
+  if (!name) {
+    name = `FIELD_${index + 1}`;
+  } else {
+    name = name.replace(/[\s\-\.]+/g, "_");
+    name = name.replace(/[^a-zA-Z0-9_]/g, "");
+    name = name.toUpperCase();
+    if (/^[0-9]/.test(name)) {
+      name = `F_${name}`;
+    }
+    if (!name) {
+      name = `FIELD_${index + 1}`;
+    }
+  }
+  let base = name.slice(0, 10);
+  let candidate = base;
+  let counter = 2;
+  while (existingNames.has(candidate)) {
+    const suffix = `_${counter}`;
+    const maxBaseLen = 10 - suffix.length;
+    candidate = `${base.slice(0, Math.max(1, maxBaseLen))}${suffix}`;
+    counter++;
+  }
+  existingNames.add(candidate);
+  return candidate;
+}
+function extractDecimalsFromFormat(format) {
+  if (!format || typeof format !== "string") return void 0;
+  const match = format.match(/\.([0#]+)/);
+  if (match) {
+    return match[1].length;
+  }
+  if (format === "0" || format === "#,##0") {
+    return 0;
+  }
+  return void 0;
+}
+function mapTypeToDbf(type, options = {}) {
+  if (!type) return null;
+  if (type === String || type === "string" || type === "text" || type === "char" || type === "character" || type === "C") {
+    return "C";
+  }
+  if (type === Number || type === "number" || type === "numeric" || type === "N") {
+    return "N";
+  }
+  if (type === "integer" || type === "int" || type === "I") {
+    return options.fileVersion === 48 || type === "I" ? "I" : "N";
+  }
+  if (type === "float" || type === "F") {
+    return "F";
+  }
+  if (type === "double" || type === "B" || type === "O") {
+    return "B";
+  }
+  if (type === Boolean || type === "boolean" || type === "bool" || type === "logical" || type === "L") {
+    return "L";
+  }
+  if (type === Date || type === "date" || type === "D") {
+    return "D";
+  }
+  if (type === "datetime" || type === "timestamp" || type === "T") {
+    return "T";
+  }
+  if (type === "currency" || type === "Y") {
+    return "Y";
+  }
+  if (type === "memo" || type === "M") {
+    return "M";
+  }
+  return "C";
+}
+function getDefaultFieldSize(type, decimalPlaces = 0) {
+  switch (type) {
+    case "C":
+      return 30;
+    case "N":
+      return decimalPlaces > 0 ? 12 : 10;
+    case "F":
+      return 16;
+    case "I":
+      return 4;
+    case "L":
+      return 1;
+    case "D":
+      return 8;
+    case "T":
+      return 8;
+    case "B":
+      return 8;
+    case "Y":
+      return 8;
+    case "M":
+      return 10;
+    default:
+      return 30;
+  }
+}
+function extractRowsAndHeaders(input) {
+  if (!input) return { rows: [], headers: [], is2D: false };
+  if (input.worksheets && Array.isArray(input.worksheets) && input.worksheets[0]) {
+    const ws = input.worksheets[0];
+    const data = ws.data || [];
+    if (data.length > 0) {
+      const hasExplicitColumns = Array.isArray(ws.columns) && ws.columns.length > 0;
+      const headers = hasExplicitColumns ? ws.columns.map((c) => c.name || c.title || "") : data[0].map((c) => String(c && typeof c === "object" && "value" in c ? c.value : c));
+      const rows = hasExplicitColumns ? data : data.slice(1);
+      return { rows, headers, is2D: true };
+    }
+    return { rows: [], headers: [], is2D: true };
+  }
+  if (!Array.isArray(input)) return { rows: [], headers: [], is2D: false };
+  if (input.length === 0) return { rows: [], headers: [], is2D: false };
+  if (Array.isArray(input[0])) {
+    const headers = input[0].map((c) => String(c && typeof c === "object" && "value" in c ? c.value : c));
+    const rows = input.slice(1);
+    return { rows, headers, is2D: true };
+  }
+  if (typeof input[0] === "object" && input[0] !== null) {
+    const keySet = /* @__PURE__ */ new Set();
+    for (const obj of input) {
+      if (obj && typeof obj === "object") {
+        for (const k of Object.keys(obj)) {
+          if (k !== "_deleted" && k !== "__deleted") {
+            keySet.add(k);
+          }
+        }
+      }
+    }
+    const headers = Array.from(keySet);
+    return { rows: input, headers, is2D: false };
+  }
+  return { rows: [], headers: [], is2D: false };
+}
+function inferFieldTypeFromValues(values) {
+  let hasString = false;
+  let hasNumber = false;
+  let hasDate = false;
+  let hasBoolean = false;
+  for (const raw of values) {
+    const val = raw && typeof raw === "object" && "value" in raw && !(raw instanceof Date) ? raw.value : raw;
+    if (val === null || val === void 0) continue;
+    if (typeof val === "boolean") {
+      hasBoolean = true;
+    } else if (val instanceof Date) {
+      hasDate = true;
+    } else if (typeof val === "number" && !isNaN(val)) {
+      hasNumber = true;
+    } else if (typeof val === "string") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) {
+        hasDate = true;
+      } else {
+        hasString = true;
+      }
+    } else {
+      hasString = true;
+    }
+  }
+  if (hasString) return "C";
+  if (hasNumber) return "N";
+  if (hasDate) return "D";
+  if (hasBoolean) return "L";
+  return "C";
+}
+function normalizeSchemaToDbfFields(schema, data = [], options = {}) {
+  const { rows, headers, is2D } = extractRowsAndHeaders(data);
+  const existingNames = /* @__PURE__ */ new Set();
+  const rawSchema = schema || options.schema || options.fieldDescriptors || options.columns;
+  let fieldConfigs = [];
+  if (Array.isArray(rawSchema)) {
+    fieldConfigs = rawSchema.map((colDef, index) => {
+      const rawHeader = colDef.name || colDef.column || colDef.header || colDef.title || colDef.prop || `FIELD_${index + 1}`;
+      const prop = colDef.prop || colDef.name || colDef.column;
+      const accessor = typeof colDef.value === "function" ? colDef.value : (row) => {
+        if (is2D && Array.isArray(row)) {
+          return row[index];
+        }
+        if (row && typeof row === "object") {
+          if (prop && prop in row) return row[prop];
+          if (rawHeader in row) return row[rawHeader];
+        }
+        return null;
+      };
+      return {
+        rawName: rawHeader,
+        prop,
+        type: colDef.type,
+        size: colDef.size || colDef.length || colDef.width,
+        decimalPlaces: colDef.decimalPlaces !== void 0 ? colDef.decimalPlaces : colDef.decimals !== void 0 ? colDef.decimals : colDef.decimalCount,
+        format: colDef.format,
+        value: accessor,
+        index
+      };
+    });
+  } else if (rawSchema && typeof rawSchema === "object") {
+    fieldConfigs = Object.entries(rawSchema).map(([propKey, colDef], index) => {
+      const rawHeader = colDef.column || colDef.header || colDef.name || colDef.title || propKey;
+      const accessor = typeof colDef.value === "function" ? colDef.value : (row) => {
+        if (is2D && Array.isArray(row)) {
+          return row[index];
+        }
+        if (row && typeof row === "object") {
+          if (propKey in row) return row[propKey];
+          if (rawHeader in row) return row[rawHeader];
+        }
+        return null;
+      };
+      return {
+        rawName: rawHeader,
+        prop: propKey,
+        type: colDef.type,
+        size: colDef.size || colDef.length || colDef.width,
+        decimalPlaces: colDef.decimalPlaces !== void 0 ? colDef.decimalPlaces : colDef.decimals !== void 0 ? colDef.decimals : colDef.decimalCount,
+        format: colDef.format,
+        value: accessor,
+        index
+      };
+    });
+  } else {
+    fieldConfigs = headers.map((header, index) => {
+      const accessor = (row) => {
+        if (is2D && Array.isArray(row)) {
+          return row[index];
+        }
+        if (row && typeof row === "object") {
+          return row[header];
+        }
+        return null;
+      };
+      return {
+        rawName: header || `FIELD_${index + 1}`,
+        prop: header,
+        type: null,
+        size: null,
+        decimalPlaces: null,
+        format: null,
+        value: accessor,
+        index
+      };
+    });
+  }
+  return fieldConfigs.map((cfg, index) => {
+    const sanitizedName = sanitizeDbfFieldName(cfg.rawName, index, existingNames);
+    const sampleValues = [];
+    for (let r = 0; r < Math.min(rows.length, 1e3); r++) {
+      const rowVal = cfg.value(rows[r], r);
+      const val = rowVal && typeof rowVal === "object" && "value" in rowVal && !(rowVal instanceof Date) ? rowVal.value : rowVal;
+      if (val !== null && val !== void 0) {
+        sampleValues.push(val);
+      }
+    }
+    let dbfType = mapTypeToDbf(cfg.type, options);
+    if (!dbfType) {
+      dbfType = inferFieldTypeFromValues(sampleValues);
+    }
+    let decPlaces = cfg.decimalPlaces;
+    if (decPlaces === null || decPlaces === void 0) {
+      const fmtDec = extractDecimalsFromFormat(cfg.format);
+      if (fmtDec !== void 0) {
+        decPlaces = fmtDec;
+      } else if (dbfType === "N" || dbfType === "F") {
+        let maxFoundDecimals = 0;
+        let hasFloats = false;
+        for (const val of sampleValues) {
+          if (typeof val === "number" && !isNaN(val) && val % 1 !== 0) {
+            hasFloats = true;
+            const decStr = String(val).split(".")[1] || "";
+            if (decStr.length > maxFoundDecimals) {
+              maxFoundDecimals = Math.min(decStr.length, 15);
+            }
+          }
+        }
+        decPlaces = hasFloats ? Math.max(2, maxFoundDecimals) : 0;
+      } else if (dbfType === "Y") {
+        decPlaces = 4;
+      } else {
+        decPlaces = 0;
+      }
+    }
+    let fieldSize = cfg.size;
+    if (!fieldSize || fieldSize <= 0) {
+      if (dbfType === "C") {
+        let maxByteLen = 0;
+        for (const val of sampleValues) {
+          const str = String(val);
+          const len = typeof Buffer !== "undefined" ? Buffer.byteLength(str, "utf-8") : new TextEncoder().encode(str).length;
+          if (len > maxByteLen) maxByteLen = len;
+        }
+        fieldSize = Math.min(254, Math.max(10, maxByteLen || 30));
+      } else if (dbfType === "N" || dbfType === "F") {
+        let maxIntDigits = 1;
+        let hasNeg = false;
+        for (const val of sampleValues) {
+          if (typeof val === "number" && !isNaN(val)) {
+            if (val < 0) hasNeg = true;
+            const intDigits = Math.floor(Math.abs(val)).toString().length;
+            if (intDigits > maxIntDigits) maxIntDigits = intDigits;
+          }
+        }
+        const neededSize = maxIntDigits + (decPlaces > 0 ? decPlaces + 1 : 0) + (hasNeg ? 1 : 0);
+        fieldSize = Math.min(20, Math.max(decPlaces > 0 ? 12 : 10, neededSize));
+      } else {
+        fieldSize = getDefaultFieldSize(dbfType, decPlaces);
+      }
+    }
+    if (dbfType === "C") {
+      fieldSize = Math.min(254, Math.max(1, fieldSize));
+    } else if (dbfType === "N" || dbfType === "F") {
+      fieldSize = Math.min(20, Math.max(1, fieldSize));
+    } else if (dbfType === "I") {
+      fieldSize = 4;
+      decPlaces = 0;
+    } else if (dbfType === "L") {
+      fieldSize = 1;
+      decPlaces = 0;
+    } else if (dbfType === "D" || dbfType === "T" || dbfType === "B" || dbfType === "Y") {
+      fieldSize = 8;
+      if (dbfType !== "Y") decPlaces = 0;
+    } else if (dbfType === "M") {
+      fieldSize = 10;
+      decPlaces = 0;
+    }
+    return {
+      name: sanitizedName,
+      prop: cfg.prop,
+      type: dbfType,
+      size: fieldSize,
+      decimalPlaces: decPlaces,
+      value: cfg.value
+    };
+  });
+}
+function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
+  let val = rawVal;
+  if (val && typeof val === "object" && "value" in val && !(val instanceof Date)) {
+    val = val.value;
+  }
+  switch (field.type) {
+    case "C": {
+      if (val === null || val === void 0) {
+        buffer.fill(32, offset, offset + field.size);
+      } else {
+        const bytes = encodeString(String(val), encoding);
+        const copyLen = Math.min(bytes.length, field.size);
+        buffer.set(bytes.subarray(0, copyLen), offset);
+        if (copyLen < field.size) {
+          buffer.fill(32, offset + copyLen, offset + field.size);
+        }
+      }
+      break;
+    }
+    case "N":
+    case "F": {
+      if (val === null || val === void 0 || typeof val === "number" && isNaN(val)) {
+        buffer.fill(32, offset, offset + field.size);
+      } else {
+        const num = Number(val);
+        let str = "";
+        if (isNaN(num)) {
+          str = "";
+        } else if (field.decimalPlaces > 0) {
+          str = num.toFixed(field.decimalPlaces);
+        } else {
+          str = Math.round(num).toString();
+        }
+        if (str.length > field.size) {
+          buffer.fill(42, offset, offset + field.size);
+        } else {
+          const padded = str.padStart(field.size, " ");
+          for (let i = 0; i < field.size; i++) {
+            buffer[offset + i] = padded.charCodeAt(i);
+          }
+        }
+      }
+      break;
+    }
+    case "L": {
+      if (val === true || val === "T" || val === "t" || val === "Y" || val === "y" || val === 1 || val === "1") {
+        buffer[offset] = 84;
+      } else if (val === false || val === "F" || val === "f" || val === "N" || val === "n" || val === 0 || val === "0") {
+        buffer[offset] = 70;
+      } else {
+        buffer[offset] = 63;
+      }
+      break;
+    }
+    case "D": {
+      let dateStr = null;
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, "0");
+        const d = String(val.getDate()).padStart(2, "0");
+        dateStr = `${String(y).padStart(4, "0")}${m}${d}`;
+      } else if (typeof val === "string" && val.trim().length > 0) {
+        const clean = val.replace(/[^0-9]/g, "");
+        if (clean.length >= 8) {
+          dateStr = clean.slice(0, 8);
+        }
+      } else if (typeof val === "number" && !isNaN(val)) {
+        const dt = new Date(val);
+        if (!isNaN(dt.getTime())) {
+          const y = dt.getFullYear();
+          const m = String(dt.getMonth() + 1).padStart(2, "0");
+          const d = String(dt.getDate()).padStart(2, "0");
+          dateStr = `${String(y).padStart(4, "0")}${m}${d}`;
+        }
+      }
+      if (dateStr && dateStr.length === 8) {
+        for (let i = 0; i < 8; i++) {
+          buffer[offset + i] = dateStr.charCodeAt(i);
+        }
+      } else {
+        buffer.fill(32, offset, offset + 8);
+      }
+      break;
+    }
+    case "I": {
+      const intVal = val === null || val === void 0 ? 0 : Math.round(Number(val) || 0);
+      view.setInt32(offset, intVal, true);
+      break;
+    }
+    case "B": {
+      const dblVal = val === null || val === void 0 ? 0 : Number(val) || 0;
+      view.setFloat64(offset, dblVal, true);
+      break;
+    }
+    case "T": {
+      if (val) {
+        const dt = val instanceof Date ? val : new Date(val);
+        if (!isNaN(dt.getTime())) {
+          const epochMs = dt.getTime();
+          const julian = Math.floor(epochMs / 864e5) + 2440588;
+          const ms = (epochMs % 864e5 + 864e5) % 864e5;
+          view.setUint32(offset, julian, true);
+          view.setUint32(offset + 4, ms, true);
+        } else {
+          buffer.fill(0, offset, offset + 8);
+        }
+      } else {
+        buffer.fill(0, offset, offset + 8);
+      }
+      break;
+    }
+    case "Y": {
+      const curNum = val === null || val === void 0 ? 0 : Number(val) || 0;
+      const scaled = BigInt(Math.round(curNum * 1e4));
+      view.setBigInt64(offset, scaled, true);
+      break;
+    }
+    case "M": {
+      const memoStr = val === null || val === void 0 ? "" : String(val);
+      const padded = memoStr.padStart(10, " ").slice(-10);
+      for (let i = 0; i < 10; i++) {
+        buffer[offset + i] = padded.charCodeAt(i);
+      }
+      break;
+    }
+    default: {
+      const strVal = val === null || val === void 0 ? "" : String(val);
+      const bytes = encodeString(strVal, encoding);
+      const copyLen = Math.min(bytes.length, field.size);
+      buffer.set(bytes.subarray(0, copyLen), offset);
+      if (copyLen < field.size) {
+        buffer.fill(32, offset + copyLen, offset + field.size);
+      }
+      break;
+    }
+  }
+}
+function createDBF(data, options = {}) {
+  if (typeof options === "string") {
+    options = { filePath: options };
+  }
+  const { rows } = extractRowsAndHeaders(data);
+  const fields = normalizeSchemaToDbfFields(
+    options.schema || options.fieldDescriptors || options.columns,
+    data,
+    options
+  );
+  if (fields.length === 0) {
+    throw new Error("Cannot export DBF: No columns or fields defined.");
+  }
+  const encoding = options.encoding || "utf-8";
+  const fileVersion = typeof options.fileVersion === "number" ? options.fileVersion : options.fileVersion === "Visual FoxPro" ? 48 : 3;
+  const headerLength = 32 + fields.length * 32 + 1;
+  const recordLength = 1 + fields.reduce((sum, f) => sum + f.size, 0);
+  const totalLength = headerLength + rows.length * recordLength + 1;
+  const buffer = new Uint8Array(totalLength);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  buffer[0] = fileVersion & 255;
+  const lastUpdate = options.lastUpdate instanceof Date ? options.lastUpdate : /* @__PURE__ */ new Date();
+  buffer[1] = lastUpdate.getFullYear() - 1900 & 255;
+  buffer[2] = lastUpdate.getMonth() + 1 & 255;
+  buffer[3] = lastUpdate.getDate() & 255;
+  view.setUint32(4, rows.length, true);
+  view.setUint16(8, headerLength, true);
+  view.setUint16(10, recordLength, true);
+  const encLower = encoding.toLowerCase();
+  const defaultLangDriver = encLower.includes("latin") || encLower.includes("1252") || encLower.includes("iso") ? 3 : 0;
+  buffer[29] = options.languageDriver !== void 0 ? options.languageDriver : defaultLangDriver;
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const fieldOffset = 32 + i * 32;
+    const nameBytes = encodeString(field.name, "ascii");
+    const nameLen = Math.min(nameBytes.length, 10);
+    buffer.set(nameBytes.subarray(0, nameLen), fieldOffset);
+    buffer.fill(0, fieldOffset + nameLen, fieldOffset + 11);
+    buffer[fieldOffset + 11] = field.type.charCodeAt(0);
+    buffer[fieldOffset + 16] = field.size & 255;
+    buffer[fieldOffset + 17] = (field.decimalPlaces || 0) & 255;
+  }
+  buffer[32 + fields.length * 32] = 13;
+  let recOffset = headerLength;
+  const deletedSet = Array.isArray(options.deletedRows) ? new Set(options.deletedRows) : null;
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    const isDeleted = Boolean(row && (row._deleted === true || row.__deleted === true)) || typeof options.isRowDeleted === "function" && options.isRowDeleted(row, r) || deletedSet && deletedSet.has(r);
+    buffer[recOffset] = isDeleted ? 42 : 32;
+    let colOffset = recOffset + 1;
+    for (let f = 0; f < fields.length; f++) {
+      const field = fields[f];
+      const rawVal = field.value(row, r);
+      writeFieldValue(buffer, view, colOffset, rawVal, field, encoding);
+      colOffset += field.size;
+    }
+    recOffset += recordLength;
+  }
+  buffer[totalLength - 1] = 26;
+  return buffer;
+}
+async function writeDBF(data, options = {}) {
+  if (typeof options === "string") {
+    options = { filePath: options };
+  }
+  const uint8Array = createDBF(data, options);
+  if (options.filePath) {
+    await import_node_fs.default.promises.writeFile(options.filePath, uint8Array);
+    return options.filePath;
+  }
+  if (options.uint8Array) {
+    return uint8Array;
+  }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+  }
+  return uint8Array;
+}
+
+// src/write/schema.js
+function normalizeSchemaToColumns(schema) {
+  if (Array.isArray(schema)) {
+    return schema.map((col) => ({
+      header: col.column || col.header || col.name || "",
+      cell: (row, index) => {
+        const val = typeof col.value === "function" ? col.value(row, index) : col.prop ? row[col.prop] : col.column ? row[col.column] : col.name ? row[col.name] : null;
+        return {
+          value: val !== void 0 ? val : null,
+          type: col.type,
+          format: col.format,
+          ...col.style || {}
+        };
+      },
+      width: col.width
+    }));
+  }
+  if (schema && typeof schema === "object") {
+    return Object.entries(schema).map(([propKey, colDef]) => ({
+      header: colDef.column || colDef.header || propKey,
+      cell: (row, index) => {
+        const val = typeof colDef.value === "function" ? colDef.value(row, index) : row[propKey];
+        return {
+          value: val !== void 0 ? val : null,
+          type: colDef.type,
+          format: colDef.format,
+          ...colDef.style || {}
+        };
+      },
+      width: colDef.width
+    }));
+  }
+  return [];
+}
+
+// src/write/getSheetData/getSheetData.js
+function getSheetData(objects, columns) {
+  var headerRow;
+  if (columns.some(function(column) {
+    return column.header;
+  })) {
+    headerRow = columns.map(function(_ref) {
+      var header = _ref.header;
+      return header || null;
+    });
+  }
+  return (headerRow ? [headerRow] : []).concat(objects.map(function(object, objectIndex) {
+    return columns.map(function(_ref2) {
+      var cell = _ref2.cell;
+      return cell(object, objectIndex);
+    });
+  }));
+}
+
+// src/write/ods.js
+function escapeXml(str) {
+  if (str === null || str === void 0) return "";
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+function normalizeWorkbookSheets(data, options = {}) {
+  let sheets = [];
+  if (data && Array.isArray(data.worksheets)) {
+    sheets = data.worksheets.map((ws, i) => {
+      const sheetName = ws.worksheetName || ws.sheet || ws.name || `Sheet${i + 1}`;
+      let rows = ws.data || [];
+      if (ws.columns && Array.isArray(ws.columns) && rows.length > 0 && !Array.isArray(rows[0])) {
+        const cols = normalizeSchemaToColumns(ws.columns);
+        rows = getSheetData(rows, cols);
+      }
+      return { name: sheetName, rows };
+    });
+  } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null && !Array.isArray(data[0]) && (data[0].sheet || data[0].data)) {
+    sheets = data.map((s, i) => {
+      const sheetName = s.sheet || s.name || `Sheet${i + 1}`;
+      let rows = s.data || [];
+      const schema = s.schema || s.columns || options.schema;
+      if (schema && rows.length > 0 && !Array.isArray(rows[0])) {
+        const cols = normalizeSchemaToColumns(schema);
+        rows = getSheetData(rows, cols);
+      }
+      return { name: sheetName, rows };
+    });
+  } else if (Array.isArray(data) && data.length > 0 && !Array.isArray(data[0])) {
+    const schema = options.schema || options.columns;
+    if (schema) {
+      const columns = normalizeSchemaToColumns(schema);
+      const grid = getSheetData(data, columns);
+      sheets = [{
+        name: options.sheet || "Sheet1",
+        rows: grid
+      }];
+    } else {
+      const keys = Object.keys(data[0] || {});
+      const headerRow = keys.map((k) => ({ value: k, fontWeight: "bold" }));
+      const dataRows = data.map((obj) => keys.map((k) => ({ value: obj[k] })));
+      sheets = [{
+        name: options.sheet || "Sheet1",
+        rows: [headerRow, ...dataRows]
+      }];
+    }
+  } else if (Array.isArray(data)) {
+    sheets = [{
+      name: options.sheet || "Sheet1",
+      rows: data
+    }];
+  } else {
+    sheets = [{
+      name: options.sheet || "Sheet1",
+      rows: []
+    }];
+  }
+  return sheets;
+}
+function formatBorderWidth(b) {
+  if (!b) return "0.06pt";
+  const s = String(b).toLowerCase();
+  if (s === "medium") return "1.5pt";
+  if (s === "thick") return "2.5pt";
+  if (s.includes("px") || s.includes("pt")) return s.split(" ")[0];
+  return "0.06pt";
+}
+function formatBorderStyle(b) {
+  if (!b) return "solid";
+  const s = String(b).toLowerCase();
+  if (s.includes("dashed")) return "dashed";
+  if (s.includes("dotted")) return "dotted";
+  if (s.includes("double")) return "double";
+  return "solid";
+}
+function extractCellStyle(cell, isDate) {
+  if (!cell || typeof cell !== "object" || cell instanceof Date) {
+    return isDate ? { isDate: true } : null;
+  }
+  const style = {};
+  if (isDate) style.isDate = true;
+  if (cell.backgroundColor) style.backgroundColor = cell.backgroundColor;
+  if (cell.textColor || cell.color) style.color = cell.textColor || cell.color;
+  if (cell.fontWeight === "bold" || cell.bold) style.bold = true;
+  if (cell.fontStyle === "italic" || cell.italic) style.italic = true;
+  if (cell.fontSize) style.fontSize = cell.fontSize;
+  if (cell.fontFamily) style.fontFamily = cell.fontFamily;
+  if (cell.align) style.align = cell.align;
+  if (cell.borderStyle || cell.borderColor) {
+    style.border = `${formatBorderWidth(cell.borderStyle)} ${formatBorderStyle(cell.borderStyle)} ${cell.borderColor || "#000000"}`;
+  }
+  if (cell.leftBorderStyle || cell.leftBorderColor) {
+    style.borderLeft = `${formatBorderWidth(cell.leftBorderStyle)} ${formatBorderStyle(cell.leftBorderStyle)} ${cell.leftBorderColor || "#000000"}`;
+  }
+  if (cell.rightBorderStyle || cell.rightBorderColor) {
+    style.borderRight = `${formatBorderWidth(cell.rightBorderStyle)} ${formatBorderStyle(cell.rightBorderStyle)} ${cell.rightBorderColor || "#000000"}`;
+  }
+  if (cell.topBorderStyle || cell.topBorderColor) {
+    style.borderTop = `${formatBorderWidth(cell.topBorderStyle)} ${formatBorderStyle(cell.topBorderStyle)} ${cell.topBorderColor || "#000000"}`;
+  }
+  if (cell.bottomBorderStyle || cell.bottomBorderColor) {
+    style.borderBottom = `${formatBorderWidth(cell.bottomBorderStyle)} ${formatBorderStyle(cell.bottomBorderStyle)} ${cell.bottomBorderColor || "#000000"}`;
+  }
+  return Object.keys(style).length > 0 ? style : null;
+}
+function serializeOdsStyle(styleName, style) {
+  let xml = `    <style:style style:name="${escapeXml(styleName)}" style:family="table-cell"`;
+  if (style.isDate) {
+    xml += ` style:data-style-name="N_DATE"`;
+  }
+  xml += `>
+`;
+  const cellProps = [];
+  if (style.backgroundColor) {
+    cellProps.push(`fo:background-color="${escapeXml(style.backgroundColor)}"`);
+  }
+  if (style.border) {
+    cellProps.push(`fo:border="${escapeXml(style.border)}"`);
+  }
+  if (style.borderLeft) {
+    cellProps.push(`fo:border-left="${escapeXml(style.borderLeft)}"`);
+  }
+  if (style.borderRight) {
+    cellProps.push(`fo:border-right="${escapeXml(style.borderRight)}"`);
+  }
+  if (style.borderTop) {
+    cellProps.push(`fo:border-top="${escapeXml(style.borderTop)}"`);
+  }
+  if (style.borderBottom) {
+    cellProps.push(`fo:border-bottom="${escapeXml(style.borderBottom)}"`);
+  }
+  if (cellProps.length > 0) {
+    xml += `      <style:table-cell-properties ${cellProps.join(" ")}/>
+`;
+  }
+  const textProps = [];
+  if (style.color) {
+    textProps.push(`fo:color="${escapeXml(style.color)}"`);
+  }
+  if (style.bold) {
+    textProps.push(`fo:font-weight="bold"`);
+  }
+  if (style.italic) {
+    textProps.push(`fo:font-style="italic"`);
+  }
+  if (style.fontSize) {
+    const sz = typeof style.fontSize === "number" ? `${style.fontSize}pt` : style.fontSize;
+    textProps.push(`fo:font-size="${escapeXml(sz)}"`);
+  }
+  if (style.fontFamily) {
+    textProps.push(`fo:font-family="${escapeXml(style.fontFamily)}"`);
+  }
+  if (textProps.length > 0) {
+    xml += `      <style:text-properties ${textProps.join(" ")}/>
+`;
+  }
+  if (style.align) {
+    const alignVal = style.align === "center" ? "center" : style.align === "right" ? "end" : "start";
+    xml += `      <style:paragraph-properties fo:text-align="${alignVal}"/>
+`;
+  }
+  xml += `    </style:style>
+`;
+  return xml;
+}
+function buildContentXml(sheets) {
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+`;
+  xml += `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" office:version="1.2">
+`;
+  const stylesMap = /* @__PURE__ */ new Map();
+  let nextStyleId = 1;
+  for (const sheet of sheets) {
+    for (const row of sheet.rows) {
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        let val = cell;
+        let isDate = false;
+        if (cell && typeof cell === "object") {
+          val = cell.value;
+          if (val instanceof Date || cell.type === Date) isDate = true;
+        } else if (cell instanceof Date) {
+          isDate = true;
+        }
+        const st = extractCellStyle(cell, isDate);
+        if (st) {
+          const key = JSON.stringify(st);
+          if (!stylesMap.has(key)) {
+            stylesMap.set(key, { name: `s_${nextStyleId++}`, style: st });
+          }
+        }
+      }
+    }
+  }
+  xml += `  <office:automatic-styles>
+`;
+  xml += `    <number:date-style style:name="N_DATE">
+`;
+  xml += `      <number:year number:style="long"/>
+`;
+  xml += `      <number:text>-</number:text>
+`;
+  xml += `      <number:month number:style="long"/>
+`;
+  xml += `      <number:text>-</number:text>
+`;
+  xml += `      <number:day number:style="long"/>
+`;
+  xml += `    </number:date-style>
+`;
+  for (const { name, style } of stylesMap.values()) {
+    xml += serializeOdsStyle(name, style);
+  }
+  xml += `  </office:automatic-styles>
+`;
+  xml += `  <office:body>
+`;
+  xml += `    <office:spreadsheet>
+`;
+  for (const sheet of sheets) {
+    xml += `      <table:table table:name="${escapeXml(sheet.name)}">
+`;
+    const coveredCells = /* @__PURE__ */ new Set();
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      xml += `        <table:table-row>
+`;
+      if (Array.isArray(row)) {
+        for (let c = 0; c < row.length; c++) {
+          const cellKey = `${r},${c}`;
+          if (coveredCells.has(cellKey)) {
+            xml += `          <table:covered-table-cell/>
+`;
+            continue;
+          }
+          const cell = row[c];
+          let val = cell;
+          let type = null;
+          let isDate = false;
+          let colSpan = 1;
+          let rowSpan = 1;
+          if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+            val = cell.value;
+            type = cell.type;
+            if (val instanceof Date || type === Date) isDate = true;
+            colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
+            rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
+          } else if (cell instanceof Date) {
+            isDate = true;
+          }
+          let spanAttr = "";
+          if (colSpan > 1) spanAttr += ` table:number-columns-spanned="${colSpan}"`;
+          if (rowSpan > 1) spanAttr += ` table:number-rows-spanned="${rowSpan}"`;
+          if (colSpan > 1 || rowSpan > 1) {
+            for (let dr = 0; dr < rowSpan; dr++) {
+              for (let dc = 0; dc < colSpan; dc++) {
+                if (dr > 0 || dc > 0) {
+                  coveredCells.add(`${r + dr},${c + dc}`);
+                }
+              }
+            }
+          }
+          let styleAttr = "";
+          const st = extractCellStyle(cell, isDate);
+          if (st) {
+            const styleEntry = stylesMap.get(JSON.stringify(st));
+            if (styleEntry) {
+              styleAttr = ` table:style-name="${styleEntry.name}"`;
+            }
+          }
+          if (val === null || val === void 0 || val === "") {
+            xml += `          <table:table-cell${spanAttr}${styleAttr}/>
+`;
+          } else if (isDate) {
+            const d = val instanceof Date ? val : new Date(val);
+            const isoDate = !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+            xml += `          <table:table-cell office:value-type="date" office:date-value="${isoDate}"${spanAttr}${styleAttr}><text:p>${isoDate}</text:p></table:table-cell>
+`;
+          } else if (typeof val === "number" || type === Number) {
+            const num = Number(val);
+            xml += `          <table:table-cell office:value-type="float" office:value="${num}"${spanAttr}${styleAttr}><text:p>${num}</text:p></table:table-cell>
+`;
+          } else if (typeof val === "boolean" || type === Boolean) {
+            const boolVal = Boolean(val);
+            xml += `          <table:table-cell office:value-type="boolean" office:boolean-value="${boolVal}"${spanAttr}${styleAttr}><text:p>${boolVal ? "TRUE" : "FALSE"}</text:p></table:table-cell>
+`;
+          } else {
+            const strVal = String(val);
+            xml += `          <table:table-cell office:value-type="string"${spanAttr}${styleAttr}><text:p>${escapeXml(strVal)}</text:p></table:table-cell>
+`;
+          }
+        }
+      }
+      xml += `        </table:table-row>
+`;
+    }
+    xml += `      </table:table>
+`;
+  }
+  xml += `    </office:spreadsheet>
+`;
+  xml += `  </office:body>
+`;
+  xml += `</office:document-content>`;
+  return xml;
+}
+function createODS(data, options = {}) {
+  const sheets = normalizeWorkbookSheets(data, options);
+  const manifestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+  <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
+  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" office:version="1.2">
+  <office:styles>
+    <style:default-style style:family="table-cell">
+      <style:paragraph-properties fo:text-align="start"/>
+    </style:default-style>
+  </office:styles>
+</office:document-styles>`;
+  const metaXml = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2">
+  <office:meta>
+    <meta:generator>spreadsheet-utils</meta:generator>
+    <meta:creation-date>${(/* @__PURE__ */ new Date()).toISOString()}</meta:creation-date>
+  </office:meta>
+</office:document-meta>`;
+  const contentXml = buildContentXml(sheets);
+  const files = {
+    "mimetype": [(0, import_fflate.strToU8)("application/vnd.oasis.opendocument.spreadsheet"), { level: 0 }],
+    "META-INF/manifest.xml": (0, import_fflate.strToU8)(manifestXml),
+    "content.xml": (0, import_fflate.strToU8)(contentXml),
+    "styles.xml": (0, import_fflate.strToU8)(stylesXml),
+    "meta.xml": (0, import_fflate.strToU8)(metaXml)
+  };
+  return (0, import_fflate.zipSync)(files);
+}
+async function writeODS(data, options = {}) {
+  if (typeof options === "string") {
+    options = { filePath: options };
+  }
+  const uint8Array = createODS(data, options);
+  if (options.filePath) {
+    await import_node_fs2.default.promises.writeFile(options.filePath, uint8Array);
+    return options.filePath;
+  }
+  if (options.uint8Array) {
+    return uint8Array;
+  }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+  }
+  return uint8Array;
+}
+
+// src/write/xls.js
+var BIFF = {
+  BOF: 2057,
+  EOF: 10,
+  DIMENSIONS: 512,
+  BLANK: 513,
+  NUMBER: 515,
+  BOOLERR: 517,
+  STRING: 519,
+  BOUNDSHEET: 133,
+  SST: 252,
+  LABELSST: 253,
+  FONT: 49,
+  XF: 224,
+  STYLE: 659,
+  CODEPAGE: 66,
+  WINDOW1: 61,
+  WINDOW2: 574,
+  MERGECELLS: 229
+};
+var PALETTE = [
+  { idx: 8, r: 0, g: 0, b: 0 },
+  { idx: 9, r: 255, g: 255, b: 255 },
+  { idx: 10, r: 255, g: 0, b: 0 },
+  { idx: 11, r: 0, g: 255, b: 0 },
+  { idx: 12, r: 0, g: 0, b: 255 },
+  { idx: 13, r: 255, g: 255, b: 0 },
+  { idx: 14, r: 255, g: 0, b: 255 },
+  { idx: 15, r: 0, g: 255, b: 255 },
+  { idx: 16, r: 128, g: 0, b: 0 },
+  { idx: 17, r: 0, g: 128, b: 0 },
+  { idx: 18, r: 0, g: 0, b: 128 },
+  { idx: 19, r: 128, g: 128, b: 0 },
+  { idx: 20, r: 128, g: 0, b: 128 },
+  { idx: 21, r: 0, g: 128, b: 128 },
+  { idx: 22, r: 192, g: 192, b: 192 },
+  { idx: 23, r: 128, g: 128, b: 128 }
+];
+function hexToColorIndex(hex) {
+  if (!hex) return 32767;
+  const clean = String(hex).replace("#", "").trim();
+  if (clean.length < 6) return 32767;
+  const r = parseInt(clean.slice(0, 2), 16) || 0;
+  const g = parseInt(clean.slice(2, 4), 16) || 0;
+  const b = parseInt(clean.slice(4, 6), 16) || 0;
+  let bestDist = Infinity;
+  let bestIdx = 8;
+  for (const p of PALETTE) {
+    const d = (p.r - r) ** 2 + (p.g - g) ** 2 + (p.b - b) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = p.idx;
+    }
+  }
+  return bestIdx;
+}
+function getBiffBorderStyle(style) {
+  if (!style) return 0;
+  const s = String(style).toLowerCase();
+  if (s.includes("double")) return 6;
+  if (s.includes("thick")) return 5;
+  if (s.includes("dashed")) return 3;
+  if (s.includes("dotted")) return 4;
+  if (s.includes("medium")) return 2;
+  return 1;
+}
+function createRecord(type, data) {
+  const payload = data instanceof Uint8Array ? data : new Uint8Array(data || 0);
+  const len = payload.length;
+  const rec = new Uint8Array(4 + len);
+  const view = new DataView(rec.buffer, rec.byteOffset, rec.byteLength);
+  view.setUint16(0, type, true);
+  view.setUint16(2, len, true);
+  rec.set(payload, 4);
+  return rec;
+}
+function concatBuffers(buffers) {
+  let totalLen = 0;
+  for (const b of buffers) totalLen += b.length;
+  const result = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const b of buffers) {
+    result.set(b, offset);
+    offset += b.length;
+  }
+  return result;
+}
+function makeFontRecord(height, isBold, colorIndex = 32767) {
+  const name = "Arial";
+  const data = new Uint8Array(14 + 2 + name.length);
+  const view = new DataView(data.buffer);
+  view.setUint16(0, height, true);
+  view.setUint16(2, 0, true);
+  view.setUint16(4, colorIndex, true);
+  view.setUint16(6, isBold ? 700 : 400, true);
+  view.setUint16(8, 0, true);
+  data[10] = 0;
+  data[11] = 0;
+  data[12] = 0;
+  data[13] = 0;
+  data[14] = name.length;
+  data[15] = 0;
+  for (let i = 0; i < name.length; i++) {
+    data[16 + i] = name.charCodeAt(i);
+  }
+  return createRecord(BIFF.FONT, data);
+}
+function createCellXFRecord(fontIndex, align, border, bgIndex) {
+  const xfData = new Uint8Array(20);
+  const view = new DataView(xfData.buffer);
+  view.setUint16(0, fontIndex, true);
+  view.setUint16(2, 0, true);
+  view.setUint16(4, 1, true);
+  let hAlign = 0;
+  if (align === "left") hAlign = 0;
+  else if (align === "center") hAlign = 1;
+  else if (align === "right") hAlign = 2;
+  xfData[6] = hAlign & 7;
+  if (border) {
+    let bVal = 0;
+    bVal |= border.left & 15;
+    bVal |= (border.right & 15) << 4;
+    bVal |= (border.top & 15) << 8;
+    bVal |= (border.bottom & 15) << 12;
+    view.setUint32(10, bVal, true);
+  }
+  if (bgIndex !== void 0 && bgIndex !== null && bgIndex !== 32767) {
+    view.setUint32(14, 1 << 26, true);
+    view.setUint16(18, bgIndex & 127, true);
+  }
+  return createRecord(BIFF.XF, xfData);
+}
+function buildFontRecords() {
+  return [
+    makeFontRecord(200, false),
+    // Font 0: Arial 10pt regular
+    makeFontRecord(200, true),
+    // Font 1: Arial 10pt bold
+    makeFontRecord(200, false),
+    // Font 2: Arial 10pt regular
+    makeFontRecord(200, false)
+    // Font 3: Arial 10pt regular
+  ];
+}
+function buildXFRecords() {
+  const records = [];
+  for (let i = 0; i < 15; i++) {
+    const xfData = new Uint8Array(20);
+    const view = new DataView(xfData.buffer);
+    view.setUint16(0, 0, true);
+    view.setUint16(2, 0, true);
+    view.setUint16(4, 65520, true);
+    records.push(createRecord(BIFF.XF, xfData));
+  }
+  {
+    const xfData = new Uint8Array(20);
+    const view = new DataView(xfData.buffer);
+    view.setUint16(0, 0, true);
+    view.setUint16(2, 0, true);
+    view.setUint16(4, 1, true);
+    records.push(createRecord(BIFF.XF, xfData));
+  }
+  {
+    const xfData = new Uint8Array(20);
+    const view = new DataView(xfData.buffer);
+    view.setUint16(0, 1, true);
+    view.setUint16(2, 0, true);
+    view.setUint16(4, 1, true);
+    records.push(createRecord(BIFF.XF, xfData));
+  }
+  return records;
+}
+function packageCFB(workbookStream) {
+  const SECTOR_SIZE = 512;
+  const streamSize = workbookStream.length;
+  const numStreamSectors = Math.max(1, Math.ceil(streamSize / SECTOR_SIZE));
+  const dirSector = 0;
+  const fatSector = numStreamSectors + 1;
+  const totalSectors = numStreamSectors + 2;
+  const totalFileSize = 512 + totalSectors * SECTOR_SIZE;
+  const file = new Uint8Array(totalFileSize);
+  const view = new DataView(file.buffer);
+  const sig = [208, 207, 17, 224, 161, 177, 26, 225];
+  for (let i = 0; i < 8; i++) file[i] = sig[i];
+  view.setUint16(24, 62, true);
+  view.setUint16(26, 3, true);
+  view.setUint16(28, 65534, true);
+  view.setUint16(30, 9, true);
+  view.setUint16(32, 6, true);
+  view.setUint32(44, 1, true);
+  view.setUint32(48, dirSector, true);
+  view.setUint32(56, 4096, true);
+  view.setUint32(60, 4294967294, true);
+  view.setUint32(64, 0, true);
+  view.setUint32(68, 4294967294, true);
+  view.setUint32(72, 0, true);
+  view.setUint32(76, fatSector, true);
+  for (let i = 1; i < 109; i++) {
+    view.setUint32(76 + i * 4, 4294967295, true);
+  }
+  const dirOffset = 512;
+  const rootName = "Root Entry";
+  for (let i = 0; i < rootName.length; i++) {
+    view.setUint16(dirOffset + i * 2, rootName.charCodeAt(i), true);
+  }
+  view.setUint16(dirOffset + 64, (rootName.length + 1) * 2, true);
+  file[dirOffset + 66] = 5;
+  file[dirOffset + 67] = 1;
+  view.setUint32(dirOffset + 68, 4294967295, true);
+  view.setUint32(dirOffset + 72, 4294967295, true);
+  view.setUint32(dirOffset + 76, 1, true);
+  view.setUint32(dirOffset + 116, 4294967294, true);
+  view.setUint32(dirOffset + 120, 0, true);
+  const wbEntryOffset = dirOffset + 128;
+  const wbName = "Workbook";
+  for (let i = 0; i < wbName.length; i++) {
+    view.setUint16(wbEntryOffset + i * 2, wbName.charCodeAt(i), true);
+  }
+  view.setUint16(wbEntryOffset + 64, (wbName.length + 1) * 2, true);
+  file[wbEntryOffset + 66] = 2;
+  file[wbEntryOffset + 67] = 1;
+  view.setUint32(wbEntryOffset + 68, 4294967295, true);
+  view.setUint32(wbEntryOffset + 72, 4294967295, true);
+  view.setUint32(wbEntryOffset + 76, 4294967295, true);
+  view.setUint32(wbEntryOffset + 116, 1, true);
+  view.setUint32(wbEntryOffset + 120, streamSize, true);
+  const streamStartOffset = 512 + 1 * SECTOR_SIZE;
+  file.set(workbookStream, streamStartOffset);
+  const fatOffset = 512 + fatSector * SECTOR_SIZE;
+  view.setUint32(fatOffset + 0, 4294967294, true);
+  for (let i = 1; i < numStreamSectors; i++) {
+    view.setUint32(fatOffset + i * 4, i + 1, true);
+  }
+  view.setUint32(fatOffset + numStreamSectors * 4, 4294967294, true);
+  view.setUint32(fatOffset + fatSector * 4, 4294967293, true);
+  for (let i = fatSector + 1; i < 128; i++) {
+    view.setUint32(fatOffset + i * 4, 4294967295, true);
+  }
+  return file;
+}
+function createXLS(data, options = {}) {
+  const sheets = normalizeWorkbookSheets(data, options);
+  const sstMap = /* @__PURE__ */ new Map();
+  const sstList = [];
+  let totalStringRefs = 0;
+  const getStringIndex = (str) => {
+    totalStringRefs++;
+    if (sstMap.has(str)) {
+      return sstMap.get(str);
+    }
+    const idx = sstList.length;
+    sstMap.set(str, idx);
+    sstList.push(str);
+    return idx;
+  };
+  const fontRecords = buildFontRecords();
+  const xfRecords = buildXFRecords();
+  const fontCache = /* @__PURE__ */ new Map();
+  const xfCache = /* @__PURE__ */ new Map();
+  const getFontIndex = (isBold, textColor) => {
+    const colorIdx = textColor ? hexToColorIndex(textColor) : 32767;
+    if (!textColor || colorIdx === 32767) {
+      return isBold ? 1 : 0;
+    }
+    const key = `${isBold}:${colorIdx}`;
+    if (fontCache.has(key)) return fontCache.get(key);
+    const idx = fontRecords.length;
+    fontRecords.push(makeFontRecord(200, isBold, colorIdx));
+    fontCache.set(key, idx);
+    return idx;
+  };
+  const getXFIndex = (cell) => {
+    if (!cell || typeof cell !== "object" || cell instanceof Date) {
+      return 15;
+    }
+    const isBold = Boolean(cell.fontWeight === "bold" || cell.bold);
+    const textColor = cell.textColor || cell.color;
+    const align = cell.align;
+    const backgroundColor = cell.backgroundColor;
+    const bgIdx = backgroundColor ? hexToColorIndex(backgroundColor) : 32767;
+    let border = null;
+    if (cell.borderStyle || cell.borderColor || cell.leftBorderStyle || cell.rightBorderStyle || cell.topBorderStyle || cell.bottomBorderStyle) {
+      border = {
+        left: getBiffBorderStyle(cell.leftBorderStyle || cell.borderStyle),
+        right: getBiffBorderStyle(cell.rightBorderStyle || cell.borderStyle),
+        top: getBiffBorderStyle(cell.topBorderStyle || cell.borderStyle),
+        bottom: getBiffBorderStyle(cell.bottomBorderStyle || cell.borderStyle)
+      };
+    }
+    if (!textColor && !align && !backgroundColor && !border) {
+      return isBold ? 16 : 15;
+    }
+    const fontIdx = getFontIndex(isBold, textColor);
+    const key = `${fontIdx}:${align || ""}:${bgIdx}:${border ? JSON.stringify(border) : ""}`;
+    if (xfCache.has(key)) return xfCache.get(key);
+    const xfIdx = xfRecords.length;
+    xfRecords.push(createCellXFRecord(fontIdx, align, border, bgIdx));
+    xfCache.set(key, xfIdx);
+    return xfIdx;
+  };
+  for (const sheet of sheets) {
+    for (const row of sheet.rows) {
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        let val = cell;
+        let type = null;
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          val = cell.value;
+          type = cell.type;
+          getXFIndex(cell);
+        }
+        if (val !== null && val !== void 0 && val !== "") {
+          if (val instanceof Date || type === Date) {
+            const d = val instanceof Date ? val : new Date(val);
+            const dateStr = !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : String(val);
+            getStringIndex(dateStr);
+          } else if (typeof val !== "number" && type !== Number && typeof val !== "boolean" && type !== Boolean) {
+            getStringIndex(String(val));
+          }
+        }
+      }
+    }
+  }
+  const globalsRecords = [];
+  const bofGlobalsData = new Uint8Array([
+    0,
+    6,
+    // BIFF8
+    5,
+    0,
+    // Workbook Globals
+    187,
+    13,
+    // build
+    204,
+    7,
+    // year
+    0,
+    0,
+    0,
+    0,
+    6,
+    0,
+    0,
+    0
+  ]);
+  globalsRecords.push(createRecord(BIFF.BOF, bofGlobalsData));
+  globalsRecords.push(createRecord(BIFF.CODEPAGE, new Uint8Array([228, 4])));
+  globalsRecords.push(createRecord(BIFF.WINDOW1, new Uint8Array([
+    0,
+    0,
+    0,
+    0,
+    0,
+    63,
+    0,
+    36,
+    56,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    88,
+    2
+  ])));
+  globalsRecords.push(...fontRecords);
+  globalsRecords.push(...xfRecords);
+  const boundsheetRecords = [];
+  for (const sheet of sheets) {
+    const name = sheet.name || "Sheet1";
+    const data2 = new Uint8Array(8 + name.length);
+    const view = new DataView(data2.buffer);
+    view.setUint32(0, 0, true);
+    data2[4] = 0;
+    data2[5] = 0;
+    data2[6] = name.length;
+    data2[7] = 0;
+    for (let i = 0; i < name.length; i++) {
+      data2[8 + i] = name.charCodeAt(i);
+    }
+    const rec = createRecord(BIFF.BOUNDSHEET, data2);
+    boundsheetRecords.push(rec);
+    globalsRecords.push(rec);
+  }
+  let sstByteLength = 8;
+  for (const str of sstList) {
+    sstByteLength += 3 + str.length;
+  }
+  const sstData = new Uint8Array(sstByteLength);
+  const sstView = new DataView(sstData.buffer);
+  sstView.setUint32(0, totalStringRefs, true);
+  sstView.setUint32(4, sstList.length, true);
+  let sstOffset = 8;
+  for (const str of sstList) {
+    sstView.setUint16(sstOffset, str.length, true);
+    sstData[sstOffset + 2] = 0;
+    for (let i = 0; i < str.length; i++) {
+      sstData[sstOffset + 3 + i] = str.charCodeAt(i) & 255;
+    }
+    sstOffset += 3 + str.length;
+  }
+  globalsRecords.push(createRecord(BIFF.SST, sstData));
+  globalsRecords.push(createRecord(BIFF.EOF, new Uint8Array(0)));
+  let currentStreamOffset = globalsRecords.reduce((sum, r) => sum + r.length, 0);
+  const worksheetStreams = [];
+  const sheetBofOffsets = [];
+  for (let sIdx = 0; sIdx < sheets.length; sIdx++) {
+    sheetBofOffsets.push(currentStreamOffset);
+    const sheet = sheets[sIdx];
+    const sheetRecords = [];
+    const bofSheetData = new Uint8Array([
+      0,
+      6,
+      // BIFF8
+      16,
+      0,
+      // Worksheet
+      187,
+      13,
+      204,
+      7,
+      0,
+      0,
+      0,
+      0,
+      6,
+      0,
+      0,
+      0
+    ]);
+    sheetRecords.push(createRecord(BIFF.BOF, bofSheetData));
+    let maxRow = 0;
+    let maxCol = 0;
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      if (Array.isArray(row)) {
+        if (r > maxRow) maxRow = r;
+        if (row.length > maxCol) maxCol = row.length;
+      }
+    }
+    const dimData = new Uint8Array(14);
+    const dimView = new DataView(dimData.buffer);
+    dimView.setUint32(0, 0, true);
+    dimView.setUint32(4, Math.max(1, maxRow + 1), true);
+    dimView.setUint16(8, 0, true);
+    dimView.setUint16(10, Math.max(1, maxCol), true);
+    sheetRecords.push(createRecord(BIFF.DIMENSIONS, dimData));
+    const win2Data = new Uint8Array(18);
+    new DataView(win2Data.buffer).setUint16(0, 694, true);
+    sheetRecords.push(createRecord(BIFF.WINDOW2, win2Data));
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      if (!Array.isArray(row)) continue;
+      for (let c = 0; c < row.length; c++) {
+        const cell = row[c];
+        let val = cell;
+        let type = null;
+        let isBold = false;
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          val = cell.value;
+          type = cell.type;
+          if (cell.fontWeight === "bold" || cell.bold) {
+            isBold = true;
+          }
+        }
+        if (val === null || val === void 0 || val === "") {
+          continue;
+        }
+        const xfIndex = getXFIndex(cell);
+        if (typeof val === "number" || type === Number) {
+          const numData = new Uint8Array(14);
+          const view = new DataView(numData.buffer);
+          view.setUint16(0, r, true);
+          view.setUint16(2, c, true);
+          view.setUint16(4, xfIndex, true);
+          view.setFloat64(6, Number(val), true);
+          sheetRecords.push(createRecord(BIFF.NUMBER, numData));
+        } else if (typeof val === "boolean" || type === Boolean) {
+          const boolData = new Uint8Array(8);
+          const view = new DataView(boolData.buffer);
+          view.setUint16(0, r, true);
+          view.setUint16(2, c, true);
+          view.setUint16(4, xfIndex, true);
+          boolData[6] = val ? 1 : 0;
+          boolData[7] = 0;
+          sheetRecords.push(createRecord(BIFF.BOOLERR, boolData));
+        } else if (val instanceof Date || type === Date) {
+          const d = val instanceof Date ? val : new Date(val);
+          const dateStr = !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : String(val);
+          const sstIdx = sstMap.get(dateStr) !== void 0 ? sstMap.get(dateStr) : getStringIndex(dateStr);
+          const labelData = new Uint8Array(10);
+          const view = new DataView(labelData.buffer);
+          view.setUint16(0, r, true);
+          view.setUint16(2, c, true);
+          view.setUint16(4, xfIndex, true);
+          view.setUint32(6, sstIdx, true);
+          sheetRecords.push(createRecord(BIFF.LABELSST, labelData));
+        } else {
+          const strVal = String(val);
+          const sstIdx = sstMap.get(strVal) !== void 0 ? sstMap.get(strVal) : getStringIndex(strVal);
+          const labelData = new Uint8Array(10);
+          const view = new DataView(labelData.buffer);
+          view.setUint16(0, r, true);
+          view.setUint16(2, c, true);
+          view.setUint16(4, xfIndex, true);
+          view.setUint32(6, sstIdx, true);
+          sheetRecords.push(createRecord(BIFF.LABELSST, labelData));
+        }
+      }
+    }
+    const mergedCellsList = [];
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      if (!Array.isArray(row)) continue;
+      for (let c = 0; c < row.length; c++) {
+        const cell = row[c];
+        if (cell && typeof cell === "object") {
+          const colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
+          const rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
+          if (colSpan > 1 || rowSpan > 1) {
+            mergedCellsList.push({
+              rowFirst: r,
+              rowLast: r + rowSpan - 1,
+              colFirst: c,
+              colLast: c + colSpan - 1
+            });
+          }
+        }
+      }
+    }
+    if (mergedCellsList.length > 0) {
+      const count = mergedCellsList.length;
+      const mergeData = new Uint8Array(2 + count * 8);
+      const view = new DataView(mergeData.buffer);
+      view.setUint16(0, count, true);
+      for (let i = 0; i < count; i++) {
+        const m = mergedCellsList[i];
+        const offset = 2 + i * 8;
+        view.setUint16(offset, m.rowFirst, true);
+        view.setUint16(offset + 2, m.rowLast, true);
+        view.setUint16(offset + 4, m.colFirst, true);
+        view.setUint16(offset + 6, m.colLast, true);
+      }
+      sheetRecords.push(createRecord(BIFF.MERGECELLS, mergeData));
+    }
+    sheetRecords.push(createRecord(BIFF.EOF, new Uint8Array(0)));
+    const sheetBytes = concatBuffers(sheetRecords);
+    worksheetStreams.push(sheetBytes);
+    currentStreamOffset += sheetBytes.length;
+  }
+  for (let sIdx = 0; sIdx < boundsheetRecords.length; sIdx++) {
+    const bsRec = boundsheetRecords[sIdx];
+    const offset = sheetBofOffsets[sIdx];
+    new DataView(bsRec.buffer, bsRec.byteOffset + 4).setUint32(0, offset, true);
+  }
+  const workbookStream = concatBuffers([
+    ...globalsRecords,
+    ...worksheetStreams
+  ]);
+  return packageCFB(workbookStream);
+}
+async function writeXLS(data, options = {}) {
+  if (typeof options === "string") {
+    options = { filePath: options };
+  }
+  const uint8Array = createXLS(data, options);
+  if (options.filePath) {
+    await import_node_fs3.default.promises.writeFile(options.filePath, uint8Array);
+    return options.filePath;
+  }
+  if (options.uint8Array) {
+    return uint8Array;
+  }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+  }
+  return uint8Array;
+}
+
 // src/plugins/xls.js
 var xlsPlugin = {
   name: "xlsPlugin",
   extensions: ["xls"],
+  writeExtensions: ["xls"],
   detect(buffer) {
     if (!buffer || buffer.length < 4) return null;
     if (buffer[0] === 208 && buffer[1] === 207 && buffer[2] === 17 && buffer[3] === 224) {
@@ -2777,11 +4356,14 @@ var xlsPlugin = {
   },
   async parse(ext, file, options = {}) {
     return parseXLS(file, options);
+  },
+  async write(ext, data, options = {}) {
+    return writeXLS(data, options);
   }
 };
 
 // src/zip/zip-utils.js
-var import_fflate = require("fflate");
+var import_fflate2 = require("fflate");
 var DEFAULT_MAX_ENTRY_BYTES = 256 * 1024 * 1024;
 function toUint8Array(input) {
   if (input instanceof Uint8Array) {
@@ -2799,7 +4381,7 @@ function getZipEntryNames(buffer) {
   const bytes = toUint8Array(buffer);
   const names = [];
   try {
-    (0, import_fflate.unzipSync)(bytes, {
+    (0, import_fflate2.unzipSync)(bytes, {
       filter: (file) => {
         names.push(file.name);
         return false;
@@ -2816,7 +4398,7 @@ function unzipArchive(buffer, options = {}) {
   return new Promise((resolve, reject) => {
     let totalUncompressed = 0;
     let settled = false;
-    (0, import_fflate.unzip)(bytes, {
+    (0, import_fflate2.unzip)(bytes, {
       filter: (file) => {
         if (filter && !filter(file.name)) {
           return false;
@@ -4869,6 +6451,7 @@ async function parseXMLSpreadsheet(input, options = {}) {
 var markupPlugin = {
   name: "markupPlugin",
   extensions: ["ods", "html", "htm", "xml"],
+  writeExtensions: ["ods"],
   detect(buffer) {
     if (!buffer || buffer.length < 4) return null;
     if (buffer[0] === 80 && buffer[1] === 75 && (buffer[2] === 3 || buffer[2] === 5 || buffer[2] === 7)) {
@@ -4910,6 +6493,12 @@ var markupPlugin = {
       default:
         throw new Error(`Unsupported markup format: ${ext}`);
     }
+  },
+  async write(ext, data, options = {}) {
+    if (ext === "ods") {
+      return writeODS(data, options);
+    }
+    throw new Error(`Writing format .${ext} is not supported by markupPlugin`);
   }
 };
 
@@ -5029,9 +6618,16 @@ function parseFieldDescriptor(buffer, offset) {
     hasMDX: mdxFlag !== 0
   };
 }
+function decodeFieldValueBytes(bytes) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+  } catch {
+    return String.fromCharCode(...bytes).trim();
+  }
+}
 function parseFieldValue(buffer, offset, field) {
   const bytes = buffer.slice(offset, offset + field.length);
-  const rawValue = String.fromCharCode(...bytes).trim();
+  const rawValue = decodeFieldValueBytes(bytes);
   if (!rawValue || rawValue === "") {
     return null;
   }
@@ -5202,10 +6798,12 @@ function parseDBFBuffer(buffer) {
     // Deleted record indices (if any)
     deletedRecordIndices: deletedRecords.length > 0 ? deletedRecords : void 0
   };
+  const headerRow = fields.map((f) => f.name);
+  const sheetData = [headerRow, ...data];
   return {
     worksheets: [{
       worksheetName: "DBF Data",
-      data,
+      data: sheetData,
       columns,
       meta
     }]
@@ -5217,6 +6815,31 @@ async function parseDBF(input, options = {}) {
     return parseDBFBuffer(buffer);
   }, input, options);
 }
+
+// src/plugins/dbf.js
+var dbfPlugin = {
+  name: "dbfPlugin",
+  extensions: ["dbf"],
+  writeExtensions: ["dbf"],
+  detect(buffer) {
+    if (!buffer || buffer.length < 32) return null;
+    if ([2, 3, 4, 5, 48, 49, 67, 99, 131, 139, 142, 245, 251].includes(buffer[0])) {
+      const month = buffer[2];
+      const day = buffer[3];
+      const headerLength = buffer[8] | buffer[9] << 8;
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && headerLength >= 32) {
+        return "dbf";
+      }
+    }
+    return null;
+  },
+  async parse(ext, file, options = {}) {
+    return parseDBF(file, options);
+  },
+  async write(ext, data, options = {}) {
+    return writeDBF(data, options);
+  }
+};
 
 // src/parser/lotus.js
 var LOTUS_RECORDS = {
@@ -6580,6 +8203,7 @@ async function parseNumbers(input, options = {}) {
 var legacyPlugin = {
   name: "legacyPlugin",
   extensions: ["dbf", "dif", "slk", "sylk", "wks", "wk1", "wk3", "wk4", "123", "numbers"],
+  writeExtensions: ["dbf"],
   detect(buffer) {
     if (!buffer || buffer.length < 4) return null;
     if (buffer[0] === 80 && buffer[1] === 75 && (buffer[2] === 3 || buffer[2] === 5 || buffer[2] === 7)) {
@@ -6633,11 +8257,44 @@ var legacyPlugin = {
       default:
         throw new Error(`Unsupported legacy format: ${ext}`);
     }
+  },
+  async write(ext, data, options = {}) {
+    if (ext === "dbf") {
+      return writeDBF(data, options);
+    }
+    throw new Error(`Writing format .${ext} is not supported by legacyPlugin`);
+  }
+};
+
+// src/plugins/ods.js
+var odsPlugin = {
+  name: "odsPlugin",
+  extensions: ["ods"],
+  writeExtensions: ["ods"],
+  detect(buffer) {
+    if (!buffer || buffer.length < 4) return null;
+    if (buffer[0] === 80 && buffer[1] === 75 && (buffer[2] === 3 || buffer[2] === 5 || buffer[2] === 7)) {
+      try {
+        const names = getZipEntryNames(buffer);
+        if (names.includes("mimetype") || names.includes("content.xml")) {
+          return "ods";
+        }
+      } catch {
+      }
+    }
+    return null;
+  },
+  async parse(ext, file, options = {}) {
+    return parseODS(file, options);
+  },
+  async write(ext, data, options = {}) {
+    return writeODS(data, options);
   }
 };
 
 // src/core/registry.js
 var registeredParsers = /* @__PURE__ */ new Map();
+var registeredWriters = /* @__PURE__ */ new Map();
 var registeredSniffers = /* @__PURE__ */ new Set();
 var pluginNames = /* @__PURE__ */ new Set();
 var pluginsMap = /* @__PURE__ */ new Map();
@@ -6655,11 +8312,25 @@ function registerPlugin(...plugins) {
     if (typeof plugin.detect === "function") {
       registeredSniffers.add(plugin.detect);
     }
+    if (typeof plugin.write === "function") {
+      const writeExts = Array.isArray(plugin.writeExtensions) ? plugin.writeExtensions : Array.isArray(plugin.extensions) ? plugin.extensions : [];
+      for (const ext of writeExts) {
+        registeredWriters.set(ext.toLowerCase(), plugin.write);
+      }
+    }
+    if (plugin.writers && typeof plugin.writers === "object") {
+      for (const [ext, writerFn] of Object.entries(plugin.writers)) {
+        if (typeof writerFn === "function") {
+          registeredWriters.set(ext.toLowerCase(), writerFn);
+        }
+      }
+    }
   }
 }
 function unregisterPlugin(target) {
   if (!target) {
     registeredParsers.clear();
+    registeredWriters.clear();
     registeredSniffers.clear();
     pluginNames.clear();
     pluginsMap.clear();
@@ -6674,11 +8345,29 @@ function unregisterPlugin(target) {
   if (plugin && plugin.extensions) {
     for (const ext of plugin.extensions) {
       registeredParsers.delete(ext.toLowerCase());
+      registeredWriters.delete(ext.toLowerCase());
+    }
+  }
+  if (plugin && plugin.writeExtensions) {
+    for (const ext of plugin.writeExtensions) {
+      registeredWriters.delete(ext.toLowerCase());
+    }
+  }
+  if (plugin && plugin.writers) {
+    for (const ext of Object.keys(plugin.writers)) {
+      registeredWriters.delete(ext.toLowerCase());
     }
   }
   if (plugin && plugin.detect) {
     registeredSniffers.delete(plugin.detect);
   }
+}
+function getWriterForExtension(ext, localRegistry) {
+  const key = (ext || "").toLowerCase().replace(/^\./, "");
+  if (localRegistry && localRegistry.has(key)) {
+    return localRegistry.get(key);
+  }
+  return registeredWriters.get(key) || null;
 }
 function isPluginRegistered(name) {
   return pluginNames.has(name);
@@ -6689,14 +8378,23 @@ var allPlugins = [
   textPlugin,
   xlsPlugin,
   markupPlugin,
-  legacyPlugin
+  legacyPlugin,
+  dbfPlugin,
+  odsPlugin
 ];
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   allPlugins,
+  createDBF,
+  createODS,
+  createXLS,
+  dbfPlugin,
+  getWriterForExtension,
   isPluginRegistered,
   legacyPlugin,
   markupPlugin,
+  normalizeSchemaToDbfFields,
+  odsPlugin,
   parseAllHTMLTables,
   parseCSVFile,
   parseCSVString,
@@ -6714,6 +8412,9 @@ var allPlugins = [
   registerPlugin,
   textPlugin,
   unregisterPlugin,
+  writeDBF,
+  writeODS,
+  writeXLS,
   xlsPlugin
 });
 /**

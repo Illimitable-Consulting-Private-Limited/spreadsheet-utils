@@ -120,18 +120,43 @@ export async function writeHTML(data, options = {}) {
 
     const tableClass = options.tableClass || 'spreadsheet-table';
     let html = `<table class="${tableClass}">\n`;
+    const coveredCells = new Set();
 
     rows.forEach((row, rowIndex) => {
         const isHeader = rowIndex === 0 && options.hasHeader !== false;
         const tag = isHeader ? 'th' : 'td';
         html += '  <tr>\n';
-        row.forEach(cell => {
+        row.forEach((cell, colIndex) => {
+            const cellKey = `${rowIndex},${colIndex}`;
+            if (coveredCells.has(cellKey)) {
+                return;
+            }
+
             let val = cell;
             let style = '';
+            let spanAttrs = '';
+
             if (cell && typeof cell === 'object') {
                 val = cell.value !== undefined ? cell.value : '';
+                const colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
+                const rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
+
+                if (colSpan > 1) spanAttrs += ` colspan="${colSpan}"`;
+                if (rowSpan > 1) spanAttrs += ` rowspan="${rowSpan}"`;
+
+                if (colSpan > 1 || rowSpan > 1) {
+                    for (let dr = 0; dr < rowSpan; dr++) {
+                        for (let dc = 0; dc < colSpan; dc++) {
+                            if (dr > 0 || dc > 0) {
+                                coveredCells.add(`${rowIndex + dr},${colIndex + dc}`);
+                            }
+                        }
+                    }
+                }
+
                 const styles = [];
                 if (cell.fontWeight) styles.push(`font-weight:${cell.fontWeight}`);
+                if (cell.fontStyle) styles.push(`font-style:${cell.fontStyle}`);
                 if (cell.backgroundColor) styles.push(`background-color:${cell.backgroundColor}`);
                 if (cell.textColor || cell.color) styles.push(`color:${cell.textColor || cell.color}`);
                 if (cell.align) styles.push(`text-align:${cell.align}`);
@@ -144,7 +169,7 @@ export async function writeHTML(data, options = {}) {
             }
             if (val === null || val === undefined) val = '';
             const safeVal = String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            html += `    <${tag}${style}>${safeVal}</${tag}>\n`;
+            html += `    <${tag}${spanAttrs}${style}>${safeVal}</${tag}>\n`;
         });
         html += '  </tr>\n';
     });
@@ -214,3 +239,7 @@ export async function writeJSON(data, options = {}) {
 
     return jsonString;
 }
+
+export { writeDBF, createDBF, normalizeSchemaToDbfFields } from './dbf.js';
+export { writeODS, createODS } from './ods.js';
+export { writeXLS, createXLS } from './xls.js';

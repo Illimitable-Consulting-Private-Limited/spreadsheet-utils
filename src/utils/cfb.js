@@ -494,7 +494,7 @@ function createEntryObject(cfb, index) {
 
     // Read stream content
     let content;
-    if (entry.size < cfb.header.miniStreamCutoff) {
+    if (entry.size < cfb.header.miniStreamCutoff && cfb.miniStream.length > 0) {
         // Small stream - use mini FAT
         content = readMiniChain(
             cfb.miniStream,

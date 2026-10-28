@@ -1,4 +1,6 @@
 import { parseDBF, parseDBFBuffer } from '../parser/dbf.js';
+import { writeDBF, createDBF, normalizeSchemaToDbfFields } from '../write/dbf.js';
+import { dbfPlugin } from './dbf.js';
 import { parseLotus, parseLotusBuffer, parseWK1, parseWK3, parseWK4 } from '../parser/lotus.js';
 import { parseDIF, parseDIFString } from '../parser/dif.js';
 import { parseSLK, parseSLKString } from '../parser/slk.js';
@@ -17,6 +19,7 @@ import { getZipEntryNames } from '../zip/zip-utils.js';
 export const legacyPlugin = {
     name: 'legacyPlugin',
     extensions: ['dbf', 'dif', 'slk', 'sylk', 'wks', 'wk1', 'wk3', 'wk4', '123', 'numbers'],
+    writeExtensions: ['dbf'],
 
     detect(buffer) {
         if (!buffer || buffer.length < 4) return null;
@@ -83,12 +86,23 @@ export const legacyPlugin = {
             default:
                 throw new Error(`Unsupported legacy format: ${ext}`);
         }
+    },
+
+    async write(ext, data, options = {}) {
+        if (ext === 'dbf') {
+            return writeDBF(data, options);
+        }
+        throw new Error(`Writing format .${ext} is not supported by legacyPlugin`);
     }
 };
 
 export {
     parseDBF,
     parseDBFBuffer,
+    writeDBF,
+    createDBF,
+    normalizeSchemaToDbfFields,
+    dbfPlugin,
     parseLotus,
     parseLotusBuffer,
     parseWK1,

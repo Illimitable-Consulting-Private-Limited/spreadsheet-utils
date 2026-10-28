@@ -1,4 +1,5 @@
 import { parseXLS, parseXLSBuffer } from '../parser/xls.js';
+import { writeXLS, createXLS } from '../write/xls.js';
 
 /**
  * Legacy Excel format plugin.
@@ -8,6 +9,7 @@ import { parseXLS, parseXLSBuffer } from '../parser/xls.js';
 export const xlsPlugin = {
     name: 'xlsPlugin',
     extensions: ['xls'],
+    writeExtensions: ['xls'],
 
     detect(buffer) {
         if (!buffer || buffer.length < 4) return null;
@@ -20,8 +22,12 @@ export const xlsPlugin = {
 
     async parse(ext, file, options = {}) {
         return parseXLS(file, options);
+    },
+
+    async write(ext, data, options = {}) {
+        return writeXLS(data, options);
     }
 };
 
-export { parseXLS, parseXLSBuffer };
+export { parseXLS, parseXLSBuffer, writeXLS, createXLS };
 export default xlsPlugin;

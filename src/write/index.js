@@ -1,9 +1,26 @@
 import writeXlsxFileNode from './export/writeXlsxFileNode.js';
 import getSheetData from './getSheetData/getSheetData.js';
-import { normalizeSchemaToColumns } from './schema.js';
+import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
 import { writeCSV, writeTSV, writeHTML, writeJSON } from './formats.js';
+import { writeDBF, createDBF } from './dbf.js';
+import { writeODS, createODS } from './ods.js';
+import { writeXLS, createXLS } from './xls.js';
+import { getWriterForExtension, KNOWN_PLUGIN_MAPPINGS, createMissingPluginError } from '../core/registry.js';
 
-export { normalizeSchemaToColumns, writeCSV, writeTSV, writeHTML, writeJSON };
+export {
+    normalizeSchemaToColumns,
+    normalizeSchemaToDbfFields,
+    writeCSV,
+    writeTSV,
+    writeHTML,
+    writeJSON,
+    writeDBF,
+    createDBF,
+    writeODS,
+    createODS,
+    writeXLS,
+    createXLS
+};
 
 /**
  * Universal styled spreadsheet writer.
@@ -42,6 +59,45 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
     }
     if (format === 'json') {
         return writeJSON(data, options);
+    }
+
+    if (format === 'dbf') {
+        const writer = getWriterForExtension('dbf');
+        if (writer) {
+            return writer('dbf', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['dbf']) {
+            throw createMissingPluginError('dbf', options.filePath);
+        }
+        return writeDBF(data, options);
+    }
+
+    if (format === 'xls') {
+        const writer = getWriterForExtension('xls');
+        if (writer) {
+            return writer('xls', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['xls']) {
+            throw createMissingPluginError('xls', options.filePath);
+        }
+        return writeXLS(data, options);
+    }
+
+    if (format === 'ods') {
+        const writer = getWriterForExtension('ods');
+        if (writer) {
+            return writer('ods', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['ods']) {
+            throw createMissingPluginError('ods', options.filePath);
+        }
+        return writeODS(data, options);
+    }
+
+    // Route to other registered format writers if available
+    const customWriter = getWriterForExtension(format);
+    if (customWriter) {
+        return customWriter(format, data, options, extraOptions);
     }
 
     // Default: XLSX format

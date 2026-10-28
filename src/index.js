@@ -1,6 +1,6 @@
 import { readSpreadsheet, parseTabular, createReader, iterateSpreadsheet } from './core/dispatcher.js';
 import { detectFormat } from './core/detector.js';
-import { registerPlugin, unregisterPlugin, isPluginRegistered } from './core/registry.js';
+import { registerPlugin, unregisterPlugin, isPluginRegistered, getWriterForExtension } from './core/registry.js';
 
 // Schema exports from read-excel-file
 import parseSheetData from './schema/parseSheetData.js';
@@ -45,6 +45,7 @@ export {
     registerPlugin,
     unregisterPlugin,
     isPluginRegistered,
+    getWriterForExtension,
 
     // Schema validation and mapping
     parseSheetData,

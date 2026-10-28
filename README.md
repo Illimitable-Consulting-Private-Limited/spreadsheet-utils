@@ -34,6 +34,9 @@ Merges the streaming, low-memory SAX architecture of **[`read-excel-file`](https
   - [Writing Objects with Schema](#writing-objects-with-schema)
   - [Multi-Sheet Workbooks](#multi-sheet-workbooks)
   - [Multi-Format Exporter (`writeCSV`, `writeTSV`, `writeHTML`, `writeJSON`)](#multi-format-exporter-writecsv-writetsv-writehtml-writejson)
+  - [DBF File Export with Schema & Plugins](#dbf-file-export-with-schema--plugins)
+  - [XLS (Excel 97–2004) File Export (`xlsPlugin`)](#xls-excel-972004-file-export-xlsplugin)
+  - [ODS (OpenDocument Spreadsheet) Export (`markupPlugin` / `odsPlugin`)](#ods-opendocument-spreadsheet-export-markupplugin--odsplugin)
 - [Browser `<script>` Tag Usage](#browser-script-tag-usage)
 - [CommonJS (`require`) Support](#commonjs-require-support)
 - [Interactive Browser Playground](#interactive-browser-playground)
@@ -90,12 +93,12 @@ Spreadsheet libraries in JavaScript typically force a difficult trade-off:
 | Category | Extensions | Underlying Format | Required Module / Plugin |
 | :--- | :--- | :--- | :--- |
 | **Excel Modern** | `.xlsx` | Office Open XML (SpreadsheetML) | **`spreadsheet-utils` (Core built-in)** |
-| **Excel Binary Legacy** | `.xls` | BIFF5 / BIFF8 Binary (Excel 97–2004) | `xlsPlugin` (`spreadsheet-utils/plugins`) |
-| **OpenDocument** | `.ods` | OpenDocument Spreadsheet (OASIS) | `markupPlugin` (`spreadsheet-utils/plugins`) |
+| **Excel Binary Legacy** | `.xls` | BIFF5 / BIFF8 Binary (Excel 97–2004) (Read & Write) | `xlsPlugin` (`spreadsheet-utils/plugins`) |
+| **OpenDocument** | `.ods` | OpenDocument Spreadsheet (OASIS) (Read & Write) | `markupPlugin` / `odsPlugin` (`spreadsheet-utils/plugins`) |
 | **Delimited Text** | `.csv`, `.tsv`, `.tab`, `.txt` | RFC 4180 Delimited Text | `textPlugin` (`spreadsheet-utils/plugins`) |
 | **HTML Tables** | `.html`, `.htm` | HTML `<table>`, styles, formulas | `markupPlugin` (`spreadsheet-utils/plugins`) |
 | **XML Spreadsheet** | `.xml` | Microsoft SpreadsheetML 2003 | `markupPlugin` (`spreadsheet-utils/plugins`) |
-| **Databases** | `.dbf` | dBase III, IV, V, Visual FoxPro | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+| **Databases** | `.dbf` | dBase III, IV, V, Visual FoxPro (Read & Write) | `legacyPlugin` / `dbfPlugin` (`spreadsheet-utils/plugins`) |
 | **Apple Spreadsheets** | `.numbers` | Apple Numbers document archives | `legacyPlugin` (`spreadsheet-utils/plugins`) |
 | **Lotus 1-2-3** | `.wks`, `.wk1`, `.wk3`, `.wk4`, `.123` | Lotus 1-2-3 worksheet files | `legacyPlugin` (`spreadsheet-utils/plugins`) |
 | **Interchange Formats** | `.dif` | Data Interchange Format | `legacyPlugin` (`spreadsheet-utils/plugins`) |
@@ -476,6 +479,133 @@ await writeJSON(data, { filePath: 'data.json', asObjects: true });
 await writeSpreadsheet(data, 'report.csv');
 await writeSpreadsheet(data, 'report.html');
 await writeSpreadsheet(data, 'report.json');
+```
+
+### DBF File Export with Schema & Plugins
+
+Export data to standard dBASE database files (`.dbf` - dBASE III, Visual FoxPro) with declarative schema definitions and full roundtrip compatibility:
+
+```javascript
+import { writeSpreadsheet, writeDBF } from 'spreadsheet-utils/write';
+import { registerPlugin, dbfPlugin, legacyPlugin } from 'spreadsheet-utils/plugins';
+
+// Enable DBF export by registering either dbfPlugin or legacyPlugin
+registerPlugin(dbfPlugin);
+
+const users = [
+  { id: 101, name: 'Alice', balance: 1250.50, active: true, joined: new Date('2024-01-15') },
+  { id: 102, name: 'Bob', balance: 450.00, active: false, joined: new Date('2024-06-20') }
+];
+
+// 1. Extended schema-based write:
+const schema = {
+  id: { column: 'ID', type: Number, size: 6 },
+  name: { column: 'NAME', type: String, size: 30 },
+  balance: { column: 'BALANCE', type: Number, size: 10, decimalPlaces: 2 },
+  active: { column: 'ACTIVE', type: Boolean },
+  joined: { column: 'JOINED', type: Date }
+};
+
+await writeSpreadsheet(users, { schema, filePath: 'users.dbf' });
+
+// 2. Direct writeDBF function:
+await writeDBF(users, { schema, filePath: 'users.dbf' });
+
+// 3. Or with DBFFile (yortus/DBFFile) fieldDescriptors:
+const fieldDescriptors = [
+  { name: 'ID', type: 'I', size: 4 },
+  { name: 'TITLE', type: 'C', size: 40 },
+  { name: 'PRICE', type: 'N', size: 10, decimalPlaces: 2 }
+];
+
+const books = [
+  { ID: 1, TITLE: 'Clean Code', PRICE: 29.99 }
+];
+
+await writeDBF(books, { fieldDescriptors, filePath: 'books.dbf', fileVersion: 0x30 });
+```
+
+#### DBF Export Options
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `schema` | `Object \| Array` | `undefined` | Extended schema mapping columns, types (`String`, `Number`, `Boolean`, `Date`), byte `size`, `decimalPlaces`, and `value` extractors |
+| `fieldDescriptors` | `Array` | `undefined` | yortus/`DBFFile` style field descriptor array (`[{ name, type, size, decimalPlaces }]`) |
+| `fileVersion` | `number` | `0x03` | `0x03` (dBASE III), `0x30` (Visual FoxPro) |
+| `encoding` | `string` | `'utf-8'` | Character encoding: `'utf-8'`, `'latin1'` / `'iso-8859-1'`, `'ascii'` |
+| `lastUpdate` | `Date` | `new Date()` | Custom last-update date in the DBF header |
+| `deletedRows` | `number[]` | `undefined` | Array of row indices to mark as deleted (`0x2A` flag) |
+| `isRowDeleted` | `Function` | `undefined` | Predicate `(row, index) => boolean` to mark records deleted |
+| `filePath` | `string` | `undefined` | Output file path (Node.js) |
+| `buffer` | `boolean` | `true` (Node) | Return Node.js `Buffer` |
+| `blob` | `boolean` | `false` | Return browser `Blob` |
+| `fileName` | `string` | `undefined` | File name for browser download |
+
+### XLS (Excel 97–2004) File Export (`xlsPlugin`)
+
+Export spreadsheets to legacy binary Microsoft Excel format (`.xls` BIFF8 with Compound File Binary / OLE2 packaging). Supports 2D grids, schema mapping, multi-sheet workbooks, and cell styling:
+
+```javascript
+import { writeSpreadsheet, writeXLS, createXLS } from 'spreadsheet-utils/write';
+import { registerPlugin, xlsPlugin } from 'spreadsheet-utils/plugins';
+
+// Enable XLS writing by registering xlsPlugin
+registerPlugin(xlsPlugin);
+
+const data = [
+  ['Product', 'Q1 Sales', 'In Stock'],
+  ['Widget A', 15400, true],
+  ['Widget B', 23100, false]
+];
+
+// 1. Export via writeSpreadsheet (auto-detects .xls extension)
+await writeSpreadsheet(data, 'sales.xls');
+
+// 2. Direct writeXLS function
+await writeXLS(data, { filePath: 'sales.xls' });
+
+// 3. In-memory binary generation
+const xlsUint8 = createXLS(data);
+
+// 4. Multi-sheet workbooks
+const sheets = [
+  { sheet: 'North America', data: [['Region', 'Sales'], ['USA', 1500000]] },
+  { sheet: 'Europe', data: [['Region', 'Sales'], ['UK', 800000]] }
+];
+await writeSpreadsheet(sheets, 'global-sales.xls');
+```
+
+### ODS (OpenDocument Spreadsheet) Export (`markupPlugin` / `odsPlugin`)
+
+Export spreadsheets to OASIS OpenDocument Spreadsheet format (`.ods`), compatible with LibreOffice Calc, Apache OpenOffice, Google Sheets, and Microsoft Excel:
+
+```javascript
+import { writeSpreadsheet, writeODS, createODS } from 'spreadsheet-utils/write';
+import { registerPlugin, markupPlugin, odsPlugin } from 'spreadsheet-utils/plugins';
+
+// Enable ODS writing by registering markupPlugin or odsPlugin
+registerPlugin(markupPlugin);
+
+const employees = [
+  { id: 101, name: 'Alice Smith', salary: 75000, hireDate: new Date('2021-03-15') },
+  { id: 102, name: 'Bob Johnson', salary: 62000, hireDate: new Date('2022-07-01') }
+];
+
+const schema = [
+  { column: 'Employee ID', type: Number, value: row => row.id, fontWeight: 'bold' },
+  { column: 'Full Name', type: String, value: row => row.name },
+  { column: 'Annual Salary', type: Number, value: row => row.salary },
+  { column: 'Hire Date', type: Date, value: row => row.hireDate }
+];
+
+// 1. Export via writeSpreadsheet with schema
+await writeSpreadsheet(employees, { filePath: 'employees.ods', schema });
+
+// 2. Direct writeODS function
+await writeODS(employees, { filePath: 'employees.ods', schema });
+
+// 3. In-memory binary generation
+const odsUint8 = createODS(employees, { schema });
 ```
 
 ---

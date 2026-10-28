@@ -1,3 +1,7 @@
+import { normalizeSchemaToDbfFields, sanitizeDbfFieldName } from './dbf.js';
+
+export { normalizeSchemaToDbfFields, sanitizeDbfFieldName };
+
 /**
  * Convert schema definitions into columns format for write-excel-file.
  */

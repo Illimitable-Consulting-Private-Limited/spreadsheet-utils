@@ -94,8 +94,11 @@ export type SpreadsheetInput =
 export interface SpreadsheetPlugin {
     name: string;
     extensions: string[];
+    writeExtensions?: string[];
     detect?: (buffer: Uint8Array) => string | null | Promise<string | null>;
-    parse: (ext: string, file: any, options?: any) => Promise<TabularSpreadsheet>;
+    parse?: (ext: string, file: any, options?: any) => Promise<TabularSpreadsheet>;
+    write?: (ext: string, data: any, options?: any, extraOptions?: any) => Promise<any>;
+    writers?: Record<string, (ext: string, data: any, options?: any, extraOptions?: any) => Promise<any>>;
 }
 
 export interface ScopedReader {
@@ -128,6 +131,7 @@ export function createReader(plugins?: SpreadsheetPlugin | SpreadsheetPlugin[]):
 export function registerPlugin(...plugins: SpreadsheetPlugin[]): void;
 export function unregisterPlugin(target?: string | SpreadsheetPlugin): void;
 export function isPluginRegistered(name: string): boolean;
+export function getWriterForExtension(ext: string, localRegistry?: Map<string, Function>): Function | null;
 export function detectFormat(buffer: Uint8Array): Promise<string | null>;
 
 export function parseSheetData<T = any>(data: Row[], schema: Schema, options?: any): ParsedSchemaResult<T>;

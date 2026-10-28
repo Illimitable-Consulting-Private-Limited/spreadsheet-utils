@@ -8,7 +8,7 @@
  */
 
 import { registerPlugin } from './core/registry.js';
-import { allPlugins, textPlugin, xlsPlugin, markupPlugin, legacyPlugin } from './plugins/index.js';
+import { allPlugins, textPlugin, xlsPlugin, markupPlugin, legacyPlugin, dbfPlugin, odsPlugin } from './plugins/index.js';
 
 // Auto-register all format plugins
 registerPlugin(...allPlugins);
@@ -22,6 +22,8 @@ export {
     xlsPlugin,
     markupPlugin,
     legacyPlugin,
+    dbfPlugin,
+    odsPlugin,
     allPlugins
 };
 
@@ -31,10 +33,17 @@ export {
     writeXlsxFile,
     getSheetData,
     normalizeSchemaToColumns,
+    normalizeSchemaToDbfFields,
     writeCSV,
     writeTSV,
     writeHTML,
-    writeJSON
+    writeJSON,
+    writeDBF,
+    createDBF,
+    writeODS,
+    createODS,
+    writeXLS,
+    createXLS
 } from './write/browser.js';
 
 import { readSpreadsheet } from './index.js';

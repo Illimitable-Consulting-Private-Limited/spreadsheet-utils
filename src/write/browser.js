@@ -1,7 +1,11 @@
 import writeXlsxFileBrowser from './export/writeXlsxFileBrowser.js';
 import getSheetData from './getSheetData/getSheetData.js';
-import { normalizeSchemaToColumns } from './schema.js';
+import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
 import { normalizeTo2DArray, escapeCSVCell } from './formats.js';
+import { createDBF } from './dbf.js';
+import { createODS } from './ods.js';
+import { createXLS } from './xls.js';
+import { getWriterForExtension, KNOWN_PLUGIN_MAPPINGS, createMissingPluginError } from '../core/registry.js';
 
 function downloadFile(content, fileName, mimeType) {
     if (typeof document !== 'undefined' && typeof Blob !== 'undefined') {
@@ -57,18 +61,43 @@ export async function writeHTML(data, options = {}) {
 
     const tableClass = options.tableClass || 'spreadsheet-table';
     let html = `<table class="${tableClass}">\n`;
+    const coveredCells = new Set();
 
     rows.forEach((row, rowIndex) => {
         const isHeader = rowIndex === 0 && options.hasHeader !== false;
         const tag = isHeader ? 'th' : 'td';
         html += '  <tr>\n';
-        row.forEach(cell => {
+        row.forEach((cell, colIndex) => {
+            const cellKey = `${rowIndex},${colIndex}`;
+            if (coveredCells.has(cellKey)) {
+                return;
+            }
+
             let val = cell;
             let style = '';
+            let spanAttrs = '';
+
             if (cell && typeof cell === 'object') {
                 val = cell.value !== undefined ? cell.value : '';
+                const colSpan = Math.max(1, parseInt(cell.columnSpan || cell.colspan || cell.span) || 1);
+                const rowSpan = Math.max(1, parseInt(cell.rowSpan || cell.rowspan) || 1);
+
+                if (colSpan > 1) spanAttrs += ` colspan="${colSpan}"`;
+                if (rowSpan > 1) spanAttrs += ` rowspan="${rowSpan}"`;
+
+                if (colSpan > 1 || rowSpan > 1) {
+                    for (let dr = 0; dr < rowSpan; dr++) {
+                        for (let dc = 0; dc < colSpan; dc++) {
+                            if (dr > 0 || dc > 0) {
+                                coveredCells.add(`${rowIndex + dr},${colIndex + dc}`);
+                            }
+                        }
+                    }
+                }
+
                 const styles = [];
                 if (cell.fontWeight) styles.push(`font-weight:${cell.fontWeight}`);
+                if (cell.fontStyle) styles.push(`font-style:${cell.fontStyle}`);
                 if (cell.backgroundColor) styles.push(`background-color:${cell.backgroundColor}`);
                 if (cell.textColor || cell.color) styles.push(`color:${cell.textColor || cell.color}`);
                 if (cell.align) styles.push(`text-align:${cell.align}`);
@@ -81,7 +110,7 @@ export async function writeHTML(data, options = {}) {
             }
             if (val === null || val === undefined) val = '';
             const safeVal = String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            html += `    <${tag}${style}>${safeVal}</${tag}>\n`;
+            html += `    <${tag}${spanAttrs}${style}>${safeVal}</${tag}>\n`;
         });
         html += '  </tr>\n';
     });
@@ -144,6 +173,60 @@ export async function writeJSON(data, options = {}) {
     return jsonString;
 }
 
+async function writeDBF(data, options = {}) {
+    if (typeof options === 'string') {
+        options = { fileName: options };
+    }
+    const uint8 = createDBF(data, options);
+
+    if (options.fileName) {
+        downloadFile(uint8, options.fileName, 'application/x-dbf');
+        return;
+    }
+
+    if (options.blob) {
+        return new Blob([uint8], { type: 'application/x-dbf' });
+    }
+
+    return uint8;
+}
+
+async function writeODS(data, options = {}) {
+    if (typeof options === 'string') {
+        options = { fileName: options };
+    }
+    const uint8 = createODS(data, options);
+
+    if (options.fileName) {
+        downloadFile(uint8, options.fileName, 'application/vnd.oasis.opendocument.spreadsheet');
+        return;
+    }
+
+    if (options.blob) {
+        return new Blob([uint8], { type: 'application/vnd.oasis.opendocument.spreadsheet' });
+    }
+
+    return uint8;
+}
+
+async function writeXLS(data, options = {}) {
+    if (typeof options === 'string') {
+        options = { fileName: options };
+    }
+    const uint8 = createXLS(data, options);
+
+    if (options.fileName) {
+        downloadFile(uint8, options.fileName, 'application/vnd.ms-excel');
+        return;
+    }
+
+    if (options.blob) {
+        return new Blob([uint8], { type: 'application/vnd.ms-excel' });
+    }
+
+    return uint8;
+}
+
 export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
     if (typeof options === 'string') {
         options = { fileName: options };
@@ -164,6 +247,44 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
     }
     if (format === 'json') {
         return writeJSON(data, options);
+    }
+
+    if (format === 'dbf') {
+        const writer = getWriterForExtension('dbf');
+        if (writer) {
+            return writer('dbf', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['dbf']) {
+            throw createMissingPluginError('dbf', options.fileName);
+        }
+        return writeDBF(data, options);
+    }
+
+    if (format === 'xls') {
+        const writer = getWriterForExtension('xls');
+        if (writer) {
+            return writer('xls', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['xls']) {
+            throw createMissingPluginError('xls', options.fileName);
+        }
+        return writeXLS(data, options);
+    }
+
+    if (format === 'ods') {
+        const writer = getWriterForExtension('ods');
+        if (writer) {
+            return writer('ods', data, options, extraOptions);
+        }
+        if (KNOWN_PLUGIN_MAPPINGS['ods']) {
+            throw createMissingPluginError('ods', options.fileName);
+        }
+        return writeODS(data, options);
+    }
+
+    const customWriter = getWriterForExtension(format);
+    if (customWriter) {
+        return customWriter(format, data, options, extraOptions);
     }
 
     let inputData = data;
@@ -204,6 +325,13 @@ export const writeXlsxFile = writeXlsxFileBrowser;
 export {
     writeCSV as writeCSVBrowser,
     getSheetData,
-    normalizeSchemaToColumns
+    normalizeSchemaToColumns,
+    normalizeSchemaToDbfFields,
+    writeDBF,
+    createDBF,
+    writeODS,
+    createODS,
+    writeXLS,
+    createXLS
 };
 export default writeSpreadsheet;

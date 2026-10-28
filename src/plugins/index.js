@@ -9,20 +9,26 @@
  */
 
 export { textPlugin, parseCSVFile, parseCSVString } from './text.js';
-export { xlsPlugin, parseXLS, parseXLSBuffer } from './xls.js';
-export { markupPlugin, parseODS, parseHTMLTable, parseAllHTMLTables, parseXMLSpreadsheet, parseXMLSpreadsheetString } from './markup.js';
+export { xlsPlugin, parseXLS, parseXLSBuffer, writeXLS, createXLS } from './xls.js';
+export { markupPlugin, parseODS, parseHTMLTable, parseAllHTMLTables, parseXMLSpreadsheet, parseXMLSpreadsheetString, writeODS, createODS } from './markup.js';
 export { legacyPlugin, parseDBF, parseLotus, parseDIF, parseSLK, parseNumbers } from './legacy.js';
+export { dbfPlugin, writeDBF, createDBF, normalizeSchemaToDbfFields } from './dbf.js';
+export { odsPlugin } from './ods.js';
 
 import { textPlugin } from './text.js';
 import { xlsPlugin } from './xls.js';
 import { markupPlugin } from './markup.js';
 import { legacyPlugin } from './legacy.js';
+import { dbfPlugin } from './dbf.js';
+import { odsPlugin } from './ods.js';
 
 export const allPlugins = [
     textPlugin,
     xlsPlugin,
     markupPlugin,
-    legacyPlugin
+    legacyPlugin,
+    dbfPlugin,
+    odsPlugin
 ];
 
-export { registerPlugin, unregisterPlugin, isPluginRegistered } from '../core/registry.js';
+export { registerPlugin, unregisterPlugin, isPluginRegistered, getWriterForExtension } from '../core/registry.js';

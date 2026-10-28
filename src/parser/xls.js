@@ -779,11 +779,9 @@ function styleToCss(style) {
     }
 
     // Font color (from font object, not fill)
-    if (style.font && style.font.color) {
-        const colorIdx = style.font.color;
-        if (colorIdx >= 0 && colorIdx < excelDefaultPalette.length) {
-            css.push(`color: ${excelDefaultPalette[colorIdx]}`);
-        }
+    const fontColorIdx = style.font?.color !== undefined ? style.font.color : style.font?.colorIndex;
+    if (fontColorIdx !== undefined && fontColorIdx >= 0 && fontColorIdx < excelDefaultPalette.length) {
+        css.push(`color: ${excelDefaultPalette[fontColorIdx]}`);
     }
 
     // Borders

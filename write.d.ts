@@ -40,11 +40,27 @@ export interface WriteSheetOptions {
     fileName?: string;
     buffer?: boolean;
     blob?: boolean;
-    format?: 'xlsx' | 'csv' | 'tsv' | 'html' | 'json' | string;
+    format?: 'xlsx' | 'csv' | 'tsv' | 'html' | 'json' | 'dbf' | 'ods' | 'xls' | string;
     delimiter?: string;
     dateFormat?: string;
+    fileVersion?: number | string;
+    encoding?: string;
+    lastUpdate?: Date;
+    languageDriver?: number;
+    fieldDescriptors?: DbfFieldDescriptor[];
+    isRowDeleted?: (row: any, index: number) => boolean;
+    deletedRows?: number[];
     features?: Record<string, any>;
     [key: string]: any;
+}
+
+export interface DbfFieldDescriptor {
+    name: string;
+    type: 'C' | 'N' | 'F' | 'I' | 'L' | 'D' | 'T' | 'B' | 'Y' | 'M' | string;
+    size: number;
+    decimalPlaces?: number;
+    value?: (row: any, index?: number) => any;
+    prop?: string;
 }
 
 export interface SheetSpec {
@@ -79,6 +95,13 @@ export function writeCSV(data: any, options?: WriteSheetOptions | string): Promi
 export function writeTSV(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 export function writeHTML(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
 export function writeJSON(data: any, options?: WriteSheetOptions | string): Promise<string | Buffer>;
+export function writeDBF(data: any, options?: WriteSheetOptions | string): Promise<Uint8Array | Buffer | string | void>;
+export function createDBF(data: any, options?: WriteSheetOptions | string): Uint8Array;
+export function writeODS(data: any, options?: WriteSheetOptions | string): Promise<Uint8Array | Buffer | string | void>;
+export function createODS(data: any, options?: WriteSheetOptions | string): Uint8Array;
+export function writeXLS(data: any, options?: WriteSheetOptions | string): Promise<Uint8Array | Buffer | string | void>;
+export function createXLS(data: any, options?: WriteSheetOptions | string): Uint8Array;
 
 export function getSheetData(objects: Record<string, any>[], columns: WriteColumn[]): WriteGrid;
 export function normalizeSchemaToColumns(schema: Schema | any[]): WriteColumn[];
+export function normalizeSchemaToDbfFields(schema?: any, data?: any, options?: any): DbfFieldDescriptor[];

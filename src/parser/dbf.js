@@ -166,12 +166,20 @@ function parseFieldDescriptor(buffer, offset) {
     };
 }
 
+function decodeFieldValueBytes(bytes) {
+    try {
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes).trim();
+    } catch {
+        return String.fromCharCode(...bytes).trim();
+    }
+}
+
 /**
  * Parse a record value based on field type
  */
 function parseFieldValue(buffer, offset, field) {
     const bytes = buffer.slice(offset, offset + field.length);
-    const rawValue = String.fromCharCode(...bytes).trim();
+    const rawValue = decodeFieldValueBytes(bytes);
 
     if (!rawValue || rawValue === '') {
         return null;
@@ -398,11 +406,14 @@ export function parseDBFBuffer(buffer) {
         deletedRecordIndices: deletedRecords.length > 0 ? deletedRecords : undefined
     };
 
+    const headerRow = fields.map(f => f.name);
+    const sheetData = [headerRow, ...data];
+
     // Return in Jspreadsheet Pro format
     return {
         worksheets: [{
             worksheetName: 'DBF Data',
-            data,
+            data: sheetData,
             columns,
             meta
         }]

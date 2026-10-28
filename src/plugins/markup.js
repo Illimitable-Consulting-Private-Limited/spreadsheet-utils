@@ -2,6 +2,7 @@ import { parseODS } from '../parser/ods.js';
 import { parseHTMLTable, parseAllHTMLTables } from '../parser/table.js';
 import { parseXMLSpreadsheet, parseXMLSpreadsheetString } from '../parser/xml.js';
 import { getZipEntryNames } from '../zip/zip-utils.js';
+import { writeODS, createODS } from '../write/ods.js';
 
 /**
  * Structured Documents & Markup format plugin.
@@ -15,6 +16,7 @@ import { getZipEntryNames } from '../zip/zip-utils.js';
 export const markupPlugin = {
     name: 'markupPlugin',
     extensions: ['ods', 'html', 'htm', 'xml'],
+    writeExtensions: ['ods'],
 
     detect(buffer) {
         if (!buffer || buffer.length < 4) return null;
@@ -66,8 +68,15 @@ export const markupPlugin = {
             default:
                 throw new Error(`Unsupported markup format: ${ext}`);
         }
+    },
+
+    async write(ext, data, options = {}) {
+        if (ext === 'ods') {
+            return writeODS(data, options);
+        }
+        throw new Error(`Writing format .${ext} is not supported by markupPlugin`);
     }
 };
 
-export { parseODS, parseHTMLTable, parseAllHTMLTables, parseXMLSpreadsheet, parseXMLSpreadsheetString };
+export { parseODS, parseHTMLTable, parseAllHTMLTables, parseXMLSpreadsheet, parseXMLSpreadsheetString, writeODS, createODS };
 export default markupPlugin;

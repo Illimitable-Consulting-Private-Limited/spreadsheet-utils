@@ -25,6 +25,18 @@ export const markupPlugin: SpreadsheetPlugin;
 export const legacyPlugin: SpreadsheetPlugin;
 
 /**
+ * dBASE (.dbf) format plugin.
+ * Adds support for reading and schema-based writing of DBF files.
+ */
+export const dbfPlugin: SpreadsheetPlugin;
+
+/**
+ * OpenDocument Spreadsheet (.ods) format plugin.
+ * Adds support for reading and schema-based writing of ODS files.
+ */
+export const odsPlugin: SpreadsheetPlugin;
+
+/**
  * All format plugins array.
  */
 export const allPlugins: SpreadsheetPlugin[];
@@ -32,6 +44,26 @@ export const allPlugins: SpreadsheetPlugin[];
 export function registerPlugin(...plugins: SpreadsheetPlugin[]): void;
 export function unregisterPlugin(target?: string | SpreadsheetPlugin): void;
 export function isPluginRegistered(name: string): boolean;
+export function getWriterForExtension(ext: string, localRegistry?: Map<string, Function>): Function | null;
+
+export interface DbfFieldDescriptor {
+    name: string;
+    type: 'C' | 'N' | 'F' | 'I' | 'L' | 'D' | 'T' | 'B' | 'Y' | 'M' | string;
+    size: number;
+    decimalPlaces?: number;
+    value?: (row: any, index?: number) => any;
+    prop?: string;
+}
+
+export function writeDBF(data: any, options?: any): Promise<Uint8Array | Buffer | string | void>;
+export function createDBF(data: any, options?: any): Uint8Array;
+export function normalizeSchemaToDbfFields(schema?: any, data?: any, options?: any): DbfFieldDescriptor[];
+
+export function writeODS(data: any, options?: any): Promise<Uint8Array | Buffer | string | void>;
+export function createODS(data: any, options?: any): Uint8Array;
+
+export function writeXLS(data: any, options?: any): Promise<Uint8Array | Buffer | string | void>;
+export function createXLS(data: any, options?: any): Uint8Array;
 
 export function parseCSVFile(input: any, options?: any): Promise<TabularSpreadsheet>;
 export function parseCSVString(content: string, delimiter?: string): TabularSpreadsheet;
