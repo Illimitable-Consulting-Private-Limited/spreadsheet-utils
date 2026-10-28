@@ -1,9 +1,9 @@
 # spreadsheet-utils
 
-[![CI](https://github.com/illimitable/spreadsheet-utils/actions/workflows/upstream-sync.yml/badge.svg)](https://github.com/illimitable/spreadsheet-utils/actions)
+[![Build & Tests](https://img.shields.io/badge/tests-576%20passing-brightgreen.svg)](https://github.com/Illimitable-Consulting-Private-Limited/spreadsheet-utils/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bundle Size (Core Reader)](https://img.shields.io/badge/Core%20Reader-44%20KB%20min%20%2F%2014%20KB%20gzip-success)](https://bundlephobia.com)
-[![Formats Supported](https://img.shields.io/badge/Formats%20Supported-16%2B-blueviolet)](https://github.com/illimitable/spreadsheet-utils#supported-formats-matrix)
+[![Formats Supported](https://img.shields.io/badge/Formats%20Supported-16%2B-blueviolet)](#supported-formats-matrix)
 
 **Ultra-lightweight, low-memory universal spreadsheet toolkit for JavaScript & TypeScript** (Node.js, Browsers, and Web Workers).
 

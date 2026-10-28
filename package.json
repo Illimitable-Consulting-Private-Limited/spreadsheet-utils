@@ -10,6 +10,10 @@
   "bin": {
     "spreadsheet-utils": "./bin/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Illimitable-Consulting-Private-Limited/spreadsheet-utils.git"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
