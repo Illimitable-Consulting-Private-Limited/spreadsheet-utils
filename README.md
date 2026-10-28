@@ -1048,7 +1048,7 @@ function writeJSON(data: any, options?: WriteSheetOptions | string): Promise<str
 - **Automated GitHub Actions ([`.github/workflows/upstream-sync.yml`](file:///home/illimitable/Documents/vibe-projects/spreadsheet-utils/.github/workflows/upstream-sync.yml))**:
   - Automatically runs every Monday at 00:00 UTC and on manual dispatch.
   - Queries npm/GitLab registries for newer upstream releases.
-  - Runs full matrix test verification across Node 18, 20, and 22.
+  - Runs full matrix test verification across Node 20, 22, and 24.
 
 - **Maintenance CLI Scripts**:
 ```bash

@@ -14,6 +14,9 @@
     "type": "git",
     "url": "git+https://github.com/Illimitable-Consulting-Private-Limited/spreadsheet-utils.git"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
