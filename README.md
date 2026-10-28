@@ -15,7 +15,7 @@ Merges the streaming, low-memory SAX architecture of **[`read-excel-file`](https
 
 - [Why spreadsheet-utils?](#why-spreadsheet-utils)
   - [Architecture Comparison](#architecture-comparison)
-  - [Supported Formats Matrix](#supported-formats-matrix)
+  - [Supported Formats & Capabilities Matrix](#supported-formats--capabilities-matrix)
 - [Installation](#installation)
 - [Distribution Targets & Subpaths](#distribution-targets--subpaths)
 - [Quick Start](#quick-start)
@@ -43,6 +43,7 @@ Merges the streaming, low-memory SAX architecture of **[`read-excel-file`](https
   - [DBF File Export with Schema & Plugins](#dbf-file-export-with-schema--plugins)
   - [XLS (Excel 97–2004) File Export (`xlsPlugin`)](#xls-excel-972004-file-export-xlsplugin)
   - [ODS (OpenDocument Spreadsheet) Export (`markupPlugin` / `odsPlugin`)](#ods-opendocument-spreadsheet-export-markupplugin--odsplugin)
+  - [Format Styling & Differences Matrix](#format-styling--differences-matrix)
 - [Browser `<script>` Tag Usage](#browser-script-tag-usage)
 - [CommonJS (`require`) Support](#commonjs-require-support)
 - [Interactive Browser Playground](#interactive-browser-playground)
@@ -94,21 +95,25 @@ Spreadsheet libraries in JavaScript typically force a difficult trade-off:
 
 ---
 
-### Supported Formats Matrix
+### Supported Formats & Capabilities Matrix
 
-| Category | Extensions | Underlying Format | Required Module / Plugin |
-| :--- | :--- | :--- | :--- |
-| **Excel Modern** | `.xlsx` | Office Open XML (SpreadsheetML) | **`spreadsheet-utils` (Core built-in)** |
-| **Excel Binary Legacy** | `.xls` | BIFF5 / BIFF8 Binary (Excel 97–2004) (Read & Write) | `xlsPlugin` (`spreadsheet-utils/plugins`) |
-| **OpenDocument** | `.ods` | OpenDocument Spreadsheet (OASIS) (Read & Write) | `markupPlugin` / `odsPlugin` (`spreadsheet-utils/plugins`) |
-| **Delimited Text** | `.csv`, `.tsv`, `.tab`, `.txt` | RFC 4180 Delimited Text | `textPlugin` (`spreadsheet-utils/plugins`) |
-| **HTML Tables** | `.html`, `.htm` | HTML `<table>`, styles, formulas | `markupPlugin` (`spreadsheet-utils/plugins`) |
-| **XML Spreadsheet** | `.xml` | Microsoft SpreadsheetML 2003 | `markupPlugin` (`spreadsheet-utils/plugins`) |
-| **Databases** | `.dbf` | dBase III, IV, V, Visual FoxPro (Read & Write) | `legacyPlugin` / `dbfPlugin` (`spreadsheet-utils/plugins`) |
-| **Apple Spreadsheets** | `.numbers` | Apple Numbers document archives | `legacyPlugin` (`spreadsheet-utils/plugins`) |
-| **Lotus 1-2-3** | `.wks`, `.wk1`, `.wk3`, `.wk4`, `.123` | Lotus 1-2-3 worksheet files | `legacyPlugin` (`spreadsheet-utils/plugins`) |
-| **Interchange Formats** | `.dif` | Data Interchange Format | `legacyPlugin` (`spreadsheet-utils/plugins`) |
-| **Symbolic Link** | `.slk`, `.sylk` | Microsoft SYLK format | `legacyPlugin` (`spreadsheet-utils/plugins`) |
+`spreadsheet-utils` provides universal reading, writing, conversion, and streaming across 16+ spreadsheet and tabular data formats:
+
+| Format | Extensions | Read | Write | Multi-Sheet | Streaming $O(1)$ | Schema / Objects | Themes & Styles | Auto-Width | Required Module / Plugin |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Excel Modern** | `.xlsx` | Yes (SAX) | Yes | Yes | Read (Stream) | Yes | Yes (24-bit RGB) | Yes (with `maxWidth`) | **Core built-in** |
+| **Excel Binary Legacy** | `.xls` | Yes (BIFF5/8) | Yes (BIFF8) | Yes | Read (Iterate) | Yes | Yes (Palette) | Yes (`COLINFO`) | `xlsPlugin` |
+| **OpenDocument** | `.ods` | Yes (OASIS) | Yes | Yes | Read (Iterate) | Yes | Yes (24-bit RGB) | Yes (`table-column`) | `markupPlugin` / `odsPlugin` |
+| **Comma-Separated** | `.csv` | Yes | Yes | Single | Read & Write $O(1)$ | Yes | Text | N/A | `textPlugin` |
+| **Tab-Separated** | `.tsv`, `.tab`, `.txt` | Yes | Yes | Single | Read & Write $O(1)$ | Yes | Text | N/A | `textPlugin` |
+| **HTML Table** | `.html`, `.htm` | Yes (`<table>`) | Yes (`createHTML`) | Single | Read (Iterate) | Yes | Yes (Inline CSS) | Yes (`<col>`) | `markupPlugin` |
+| **XML Spreadsheet** | `.xml` | Yes (SpreadsheetML) | Via plugins | Yes | Read (Iterate) | Yes | Styles Parsed | Yes | `markupPlugin` |
+| **dBASE Database** | `.dbf` | Yes (III, IV, V, VFP) | Yes (III, VFP) | Single | Read (Iterate) | Yes (Typed fields) | Binary fields | Yes (Field width) | `legacyPlugin` / `dbfPlugin` |
+| **JSON / JSONL** | `.json`, `.jsonl` | Yes | Yes | Yes | Write $O(1)$ (JSONL) | Yes | N/A | N/A | Core built-in |
+| **Apple Numbers** | `.numbers` | Yes (iWork '09–'13) | Read-only | Yes | Read (Iterate) | Yes | Text / Values | N/A | `legacyPlugin` |
+| **Lotus 1-2-3** | `.wks`, `.wk1`, `.wk3`, `.wk4`, `.123` | Yes | Read-only | Single/Multi | Read (Iterate) | Yes | Text / Values | N/A | `legacyPlugin` |
+| **Data Interchange** | `.dif` | Yes | Read-only | Single | Read (Iterate) | Yes | Text / Values | N/A | `legacyPlugin` |
+| **Symbolic Link** | `.slk`, `.sylk` | Yes | Read-only | Single | Read (Iterate) | Yes | Text / Values | N/A | `legacyPlugin` |
 
 ---
 
@@ -828,24 +833,35 @@ const htmlTable = createHTML(employees, { schema });
 const htmlDoc = createHTML(employees, { schema, fullDocument: true, title: 'Employee Report' });
 ```
 
-### 3. Format Capabilities & Differences Matrix
+### Format Styling & Differences Matrix
 
-| Feature | XLSX (`write-excel-file`) | ODS (OpenDocument) | XLS (BIFF8 Binary) | HTML Table |
-| :--- | :---: | :---: | :---: | :---: |
-| **`header: { value, ...style }`** | Yes | Yes | Yes | Yes (`<th>`) |
-| **`headerStyle` option** | Yes | Yes | Yes | Yes |
-| **`cell: (row, idx) => Cell`** | Yes | Yes | Yes | Yes (`<td>`) |
-| **`fontWeight` & `fontStyle`** | Yes | Yes | Yes | Yes |
-| **`fontSize` & `fontFamily`** | Yes | Yes | Yes | Yes |
-| **`color` / `textColor`** | Yes (24-bit) | Yes (24-bit) | Yes (Palette-mapped) | Yes (CSS) |
-| **`backgroundColor`** | Yes (24-bit) | Yes (24-bit) | Yes (Palette-mapped) | Yes (CSS) |
-| **`borderColor` & `borderStyle`** | Yes | Yes | Yes | Yes |
-| **`align` & `verticalAlign`** | Yes | Yes | Yes | Yes |
-| **`columnSpan` & `rowSpan`** | Yes | Yes | Yes | Yes (`colspan`/`rowspan`) |
-| **Column `width`** | Yes | Yes | Yes (`BIFF.COLINFO`) | Yes (`<col style="...">`) |
-| **Formulas** | Yes (OpenXML) | Yes (OpenFormula) | Read-only | String |
-| **Embedded Images** | Yes (OpenXML) | No | No | No |
-| **OpenXML Conditional Formatting Rules** | Yes (`<dxfs>`) | Use `cell()` callback | Use `cell()` callback | Use `cell()` callback |
+Every export format in `spreadsheet-utils` uses the identical API definition: `writeSpreadsheet(data, { schema, theme, autoWidth, ... })`. The table below outlines exact styling and layout feature support across the export targets:
+
+| Feature / Styling Property | XLSX (`.xlsx`) | ODS (`.ods`) | XLS (`.xls`) | HTML Table (`.html`) | CSV / TSV / JSON / DBF |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Built-in Themes (`theme: 'ocean' \| 'forest' \| ...`)** | Yes | Yes | Yes | Yes | Plain text / data values |
+| **Alternating Zebra Backgrounds** | Yes | Yes | Yes | Yes | N/A |
+| **Auto Column Widths (`autoWidth: true`)** | Yes | Yes | Yes (`BIFF.COLINFO`) | Yes (`<col style="...">`) | DBF (field length) |
+| **`maxWidth` Layout Safeguard** | Yes | Yes | Yes | Yes | N/A |
+| **Header Styling (`headerStyle` / rich header)** | Yes | Yes | Yes | Yes (`<th>`) | Header row names |
+| **Dynamic Row/Cell Overrides (`cell: (row) => ({ ... })`)** | Yes | Yes | Yes | Yes | Cell values |
+| **Rich Value Return (`value: (row) => ({ value, ... })`)** | Yes | Yes | Yes | Yes | Cell values |
+| **Font Styles (`fontWeight`, `fontStyle`)** | Yes | Yes | Yes | Yes (`font-weight`, `font-style`) | N/A |
+| **Font Family & Size (`fontFamily`, `fontSize`)** | Yes | Yes | Yes | Yes (`font-family`, `font-size`) | N/A |
+| **Text Color (`color` / `textColor`)** | Yes (24-bit RGB) | Yes (24-bit RGB) | Yes (16-color palette) | Yes (Hex/CSS) | N/A |
+| **Cell Background Color (`backgroundColor`)** | Yes (24-bit RGB) | Yes (24-bit RGB) | Yes (16-color palette) | Yes (Hex/CSS) | N/A |
+| **Borders (`borderColor`, `borderStyle`, per-side)** | Yes | Yes | Yes | Yes (`border: 1px solid`) | N/A |
+| **Cell Alignment (`align`, `verticalAlign`)** | Yes | Yes | Yes | Yes (`text-align`, `vertical-align`)| N/A |
+| **Text Wrap (`wrap: true`)** | Yes | Yes | Yes | Yes (`white-space: normal`) | N/A |
+| **Merged Cells (`columnSpan`, `rowSpan`)** | Yes | Yes | Yes (`MERGECELLS`) | Yes (`colspan`, `rowspan`) | N/A |
+| **Formulas** | Yes (OpenXML) | Yes (OpenFormula) | Read-only | String | String |
+| **Multi-Sheet Support** | Yes | Yes | Yes | Single (or multi-table) | Single (JSON: array) |
+| **Synchronous String Generation** | N/A | N/A | N/A | Yes (`createHTML(data)`) | Yes (`createCSV`, etc.) |
+| **In-Memory Binary Buffer (`{ buffer: true }`)** | Yes (`Buffer`) | Yes (`Buffer`) | Yes (`Buffer` / `createXLS`) | Yes (`Buffer`) | Yes (`createDBF`) |
+| **Browser Blob Download (`{ fileName: '...' }`)** | Yes (`Blob`) | Yes (`Blob`) | Yes (`Blob`) | Yes (`Blob`) | Yes (`Blob`) |
+| **Constant $O(1)$ Memory Streaming** | Read (SAX) | Read (SAX) | Read (Iterate) | Read (Iterate) | **Read & Write $O(1)$** (`streamCSV`, `streamJSONL`) |
+| **Embedded Images** | Yes (OpenXML) | No | No | No | No |
+| **OpenXML Conditional Formatting Rules** | Yes (`<dxfs>`) | Use `cell()` callback | Use `cell()` callback | Use `cell()` callback | N/A |
 
 ---
 
