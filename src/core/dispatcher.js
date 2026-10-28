@@ -140,13 +140,43 @@ export async function parseTabular(file, options = {}, context = {}) {
 }
 
 /**
+ * Converts a 2D array of rows into an array of objects, using the first row as headers.
+ * Handles duplicate or empty headers gracefully.
+ *
+ * @param {any[][]} rows
+ * @returns {Array<Record<string, any>>}
+ */
+export function convertRowsToObjects(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const seen = new Map();
+    const headers = (rows[0] || []).map((h, i) => {
+        let base = h != null ? String(h).trim() : '';
+        if (!base) base = `column${i + 1}`;
+        const count = seen.get(base) || 0;
+        seen.set(base, count + 1);
+        return count > 0 ? `${base}_${count + 1}` : base;
+    });
+
+    const result = [];
+    for (let r = 1; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const obj = {};
+        for (let c = 0; c < headers.length; c++) {
+            obj[headers[c]] = row[c] !== undefined ? row[c] : null;
+        }
+        result.push(obj);
+    }
+    return result;
+}
+
+/**
  * Universal spreadsheet reader supporting both read-excel-file options/output
  * and TabularJS format across XLSX and registered plugin formats.
  *
  * @param {string|File|Blob|Uint8Array|ArrayBuffer|Buffer} file
  * @param {Object} [options={}]
  * @param {Object} [context={}]
- * @returns {Promise<any[][] | { rows: any[], errors: any[] } | Array<{ name: string, data: any[][] }> | { worksheets: any[] }>}
+ * @returns {Promise<any[][] | { rows: any[], errors: any[] } | Array<{ name: string, data: any[][] | Array<Record<string, any>> }> | { worksheets: any[] } | Array<Record<string, any>>>}
  */
 export async function readSpreadsheet(file, options = {}, context = {}) {
     // 1. Get tabular worksheets structure
@@ -158,12 +188,17 @@ export async function readSpreadsheet(file, options = {}, context = {}) {
         return tabularResult;
     }
 
+    const asObjects = options.asObjects === true || options.header === true;
+
     // If caller requested allSheets (read-excel-file style)
     if (options.allSheets === true) {
-        return worksheets.map((ws, i) => ({
-            name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-            data: ws.data || []
-        }));
+        return worksheets.map((ws, i) => {
+            const sheetData = ws.data || [];
+            return {
+                name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+                data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+            };
+        });
     }
 
     // Single sheet selection (options.sheet can be string name or 1-based index)
@@ -205,6 +240,10 @@ export async function readSpreadsheet(file, options = {}, context = {}) {
         return parseSheetData(data, options.schema, options);
     }
 
+    if (asObjects) {
+        return convertRowsToObjects(data);
+    }
+
     // Default: return 2D array of rows
     return data;
 }
@@ -216,7 +255,7 @@ export async function readSpreadsheet(file, options = {}, context = {}) {
  * @param {string|File|Blob|Uint8Array|ArrayBuffer|Buffer} file
  * @param {Object} [options={}]
  * @param {Object} [context={}]
- * @returns {AsyncGenerator<any[], void, unknown>}
+ * @returns {AsyncGenerator<any[] | Record<string, any>, void, unknown>}
  */
 export async function* iterateSpreadsheet(file, options = {}, context = {}) {
     const rowQueue = [];
@@ -224,10 +263,35 @@ export async function* iterateSpreadsheet(file, options = {}, context = {}) {
     let finished = false;
     let parseError = null;
 
+    const asObjects = options.asObjects === true || options.header === true;
+    let headers = null;
+
     const streamingOptions = {
         ...options,
+        // Override asObjects in the inner read so onRow receives raw rows
+        asObjects: false,
+        header: false,
         onRow: (row, rowIndex) => {
-            rowQueue.push(row);
+            if (asObjects) {
+                if (headers === null) {
+                    const seen = new Map();
+                    headers = (row || []).map((h, i) => {
+                        let base = h != null ? String(h).trim() : '';
+                        if (!base) base = `column${i + 1}`;
+                        const count = seen.get(base) || 0;
+                        seen.set(base, count + 1);
+                        return count > 0 ? `${base}_${count + 1}` : base;
+                    });
+                    return;
+                }
+                const obj = {};
+                for (let c = 0; c < headers.length; c++) {
+                    obj[headers[c]] = row[c] !== undefined ? row[c] : null;
+                }
+                rowQueue.push(obj);
+            } else {
+                rowQueue.push(row);
+            }
             if (resolveNext) {
                 const cb = resolveNext;
                 resolveNext = null;

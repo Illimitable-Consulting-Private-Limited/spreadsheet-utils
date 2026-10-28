@@ -1,15 +1,26 @@
 import writeXlsxFileNode from './export/writeXlsxFileNode.js';
 import getSheetData from './getSheetData/getSheetData.js';
-import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
+import { normalizeSchemaToColumns, normalizeSchemaToDbfFields, calculateAutoWidths } from './schema.js';
+import { THEMES, getTheme, applyTheme } from './themes.js';
 import { writeCSV, writeTSV, writeHTML, createHTML, writeJSON } from './formats.js';
 import { writeDBF, createDBF } from './dbf.js';
 import { writeODS, createODS } from './ods.js';
 import { writeXLS, createXLS } from './xls.js';
+import { streamCSV, streamTSV, streamJSONL, CSVTransformStream, JSONLTransformStream } from './streaming.js';
 import { getWriterForExtension, KNOWN_PLUGIN_MAPPINGS, createMissingPluginError } from '../core/registry.js';
 
 export {
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,
+    calculateAutoWidths,
+    THEMES,
+    getTheme,
+    applyTheme,
+    streamCSV,
+    streamTSV,
+    streamJSONL,
+    CSVTransformStream,
+    JSONLTransformStream,
     writeCSV,
     writeTSV,
     writeHTML,
@@ -125,6 +136,28 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
             const columns = normalizeSchemaToColumns(sheetOptions.columns, sheetOptions);
             inputData = getSheetData(inputData, columns);
             sheetOptions.columns = columns;
+        }
+    }
+
+    // Apply theme and autoWidth across sheets or single sheet
+    if (Array.isArray(inputData) && inputData.length > 0 && typeof inputData[0] === 'object' && inputData[0] !== null && !Array.isArray(inputData[0]) && inputData[0].data) {
+        inputData = inputData.map(s => {
+            let sData = s.data || [];
+            if (sheetOptions.theme) {
+                sData = applyTheme(sData, sheetOptions.theme, sheetOptions);
+            }
+            let sCols = s.columns;
+            if (sheetOptions.autoWidth) {
+                sCols = calculateAutoWidths(sData, sheetOptions, sCols);
+            }
+            return { ...s, data: sData, columns: sCols };
+        });
+    } else if (Array.isArray(inputData)) {
+        if (sheetOptions.theme) {
+            inputData = applyTheme(inputData, sheetOptions.theme, sheetOptions);
+        }
+        if (sheetOptions.autoWidth) {
+            sheetOptions.columns = calculateAutoWidths(inputData, sheetOptions, sheetOptions.columns);
         }
     }
 

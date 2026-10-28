@@ -199,3 +199,98 @@ export function normalizeSchemaToColumns(schema, options = {}) {
 
     return [];
 }
+
+/**
+ * Determine display character length of a cell value.
+ */
+function getCellLength(cell) {
+    if (cell == null) return 0;
+    if (typeof cell === 'object') {
+        if (cell instanceof Date) {
+            return 10;
+        }
+        if (cell.value !== undefined && cell.value !== null) {
+            return getCellLength(cell.value);
+        }
+        return 0;
+    }
+    if (typeof cell === 'number') {
+        return String(cell).length;
+    }
+    if (typeof cell === 'boolean') {
+        return cell ? 4 : 5;
+    }
+    const str = String(cell);
+    if (str.includes('\n')) {
+        const lines = str.split('\n');
+        let maxL = 0;
+        for (const line of lines) {
+            if (line.length > maxL) maxL = line.length;
+        }
+        return maxL;
+    }
+    return str.length;
+}
+
+/**
+ * Calculates responsive column widths based on maximum content length in each column.
+ * Enforces minWidth and maxWidth safeguards to prevent layout breakages.
+ *
+ * @param {Array<Array<any>>} rows - 2D grid of rows and cells
+ * @param {Object} [options={}] - Options containing autoWidth, minWidth, maxWidth, padding
+ * @param {Array<Object>} [existingColumns=null] - Existing column definitions to augment or preserve
+ * @returns {Array<{ width: number }>}
+ */
+export function calculateAutoWidths(rows, options = {}, existingColumns = null) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return existingColumns || [];
+    }
+
+    const autoWidthConfig = typeof options.autoWidth === 'object' && options.autoWidth !== null
+        ? options.autoWidth
+        : {};
+
+    const minWidth = autoWidthConfig.minWidth ?? options.minWidth ?? 8;
+    const maxWidth = autoWidthConfig.maxWidth ?? options.maxWidth ?? 40;
+    const padding = autoWidthConfig.padding ?? options.padding ?? 2;
+    const force = autoWidthConfig.force === true;
+
+    // Determine total number of columns
+    let numCols = 0;
+    if (Array.isArray(existingColumns)) {
+        numCols = existingColumns.length;
+    }
+    for (const row of rows) {
+        if (Array.isArray(row) && row.length > numCols) {
+            numCols = row.length;
+        }
+    }
+
+    if (numCols === 0) return existingColumns || [];
+
+    const colWidths = new Array(numCols).fill(0);
+
+    for (const row of rows) {
+        if (!Array.isArray(row)) continue;
+        for (let c = 0; c < row.length; c++) {
+            const len = getCellLength(row[c]);
+            if (len > colWidths[c]) {
+                colWidths[c] = len;
+            }
+        }
+    }
+
+    const result = [];
+    for (let c = 0; c < numCols; c++) {
+        const existingCol = (existingColumns && existingColumns[c]) ? { ...existingColumns[c] } : {};
+        if (!force && existingCol.width != null) {
+            result.push(existingCol);
+        } else {
+            const calculated = Math.max(minWidth, Math.min(maxWidth, colWidths[c] + padding));
+            existingCol.width = calculated;
+            result.push(existingCol);
+        }
+    }
+
+    return result;
+}

@@ -114,6 +114,8 @@ async function build() {
                 'node:fs': emptyShimPath,
                 'stream': emptyShimPath,
                 'node:stream': emptyShimPath,
+                'stream/promises': emptyShimPath,
+                'node:stream/promises': emptyShimPath,
                 'buffer': emptyShimPath,
                 'node:buffer': emptyShimPath,
                 'path': emptyShimPath,

@@ -17,6 +17,15 @@ export {
     getSheetData,
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,
+    calculateAutoWidths,
+    THEMES,
+    getTheme,
+    applyTheme,
+    streamCSV,
+    streamTSV,
+    streamJSONL,
+    CSVTransformStream,
+    JSONLTransformStream,
     DbfFieldDescriptor,
     HeaderCell,
     CellStyle,
@@ -28,6 +37,14 @@ export {
     SheetSpec,
     WriterInstance
 } from './write.d.ts';
+
+export function convertSpreadsheet(
+    input: any,
+    output?: any,
+    options?: any
+): Promise<any>;
+
+export function createConverter(writer: Function): Function;
 
 import { readSpreadsheet } from './index.js';
 export default readSpreadsheet;

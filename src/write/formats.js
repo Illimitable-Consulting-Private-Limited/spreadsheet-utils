@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { normalizeSchemaToColumns } from './schema.js';
+import { normalizeSchemaToColumns, calculateAutoWidths } from './schema.js';
+import { applyTheme } from './themes.js';
 import getSheetData from './getSheetData/getSheetData.js';
 
 /**
@@ -192,6 +193,13 @@ export function createHTML(data, options = {}) {
     // 3. 2D array
     else if (Array.isArray(data)) {
         rows = data;
+    }
+
+    if (options.theme) {
+        rows = applyTheme(rows, options.theme, options);
+    }
+    if (options.autoWidth) {
+        columns = calculateAutoWidths(rows, options, columns);
     }
 
     const tableClass = options.tableClass || 'spreadsheet-table';

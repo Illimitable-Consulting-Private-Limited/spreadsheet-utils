@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { zipSync, strToU8 } from 'fflate';
-import { normalizeSchemaToColumns } from './schema.js';
+import { normalizeSchemaToColumns, calculateAutoWidths } from './schema.js';
+import { applyTheme } from './themes.js';
 import getSheetData from './getSheetData/getSheetData.js';
 
 /**
@@ -91,6 +92,15 @@ export function normalizeWorkbookSheets(data, options = {}) {
             rows: []
         }];
     }
+
+    sheets.forEach(sheet => {
+        if (options.theme) {
+            sheet.rows = applyTheme(sheet.rows, options.theme, options);
+        }
+        if (options.autoWidth) {
+            sheet.columns = calculateAutoWidths(sheet.rows, options, sheet.columns);
+        }
+    });
 
     return sheets;
 }

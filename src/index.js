@@ -1,4 +1,4 @@
-import { readSpreadsheet, parseTabular, createReader, iterateSpreadsheet } from './core/dispatcher.js';
+import { readSpreadsheet, parseTabular, createReader, iterateSpreadsheet, convertRowsToObjects } from './core/dispatcher.js';
 import { detectFormat } from './core/detector.js';
 import { registerPlugin, unregisterPlugin, isPluginRegistered, getWriterForExtension } from './core/registry.js';
 
@@ -40,6 +40,7 @@ export {
     parser,
     createReader,
     detectFormat,
+    convertRowsToObjects,
 
     // Plugin registry
     registerPlugin,

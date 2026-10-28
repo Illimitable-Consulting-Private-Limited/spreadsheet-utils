@@ -67,6 +67,8 @@ export interface CommonOptions {
     delimiter?: string;
     tableIndex?: number;
     firstRowAsHeader?: boolean;
+    asObjects?: boolean;
+    header?: boolean;
     dateFormat?: string;
     parseNumber?: (value: string) => any;
     trim?: boolean;
@@ -113,6 +115,7 @@ export interface ScopedReader {
 export function readSpreadsheet(file: SpreadsheetInput, options: { format: 'tabular' } & CommonOptions): Promise<TabularSpreadsheet>;
 export function readSpreadsheet(file: SpreadsheetInput, options: { worksheets: true } & CommonOptions): Promise<TabularSpreadsheet>;
 export function readSpreadsheet(file: SpreadsheetInput, options: { allSheets: true } & CommonOptions): Promise<SheetEntry[]>;
+export function readSpreadsheet(file: SpreadsheetInput, options: ({ asObjects: true } | { header: true }) & CommonOptions): Promise<Array<Record<string, any>>>;
 export function readSpreadsheet<T = any>(file: SpreadsheetInput, options: OptionsWithSchema<T>): Promise<ParsedSchemaResult<T>>;
 export function readSpreadsheet(file: SpreadsheetInput, options?: CommonOptions): Promise<Row[]>;
 export default readSpreadsheet;
@@ -121,7 +124,9 @@ export const readXlsxFile: typeof readSpreadsheet;
 export const tabularjs: (file: SpreadsheetInput, options?: CommonOptions) => Promise<TabularSpreadsheet>;
 export const parseTabular: (file: SpreadsheetInput, options?: CommonOptions) => Promise<TabularSpreadsheet>;
 
+export function iterateSpreadsheet(file: SpreadsheetInput, options: ({ asObjects: true } | { header: true }) & CommonOptions): AsyncGenerator<Record<string, any>, void, unknown>;
 export function iterateSpreadsheet(file: SpreadsheetInput, options?: CommonOptions): AsyncGenerator<Row, void, unknown>;
+export function convertRowsToObjects(rows: any[][]): Array<Record<string, any>>;
 
 export function readSheet(file: SpreadsheetInput, sheet?: string | number, options?: CommonOptions): Promise<Row[]>;
 export function readSheet<T = any>(file: SpreadsheetInput, sheet: string | number, options: OptionsWithSchema<T>): Promise<ParsedSchemaResult<T>>;

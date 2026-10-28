@@ -27,6 +27,9 @@ export {
     allPlugins
 };
 
+// Converter export
+export { convertSpreadsheet, createConverter } from './core/convert-browser.js';
+
 // Writer exports (browser version)
 export {
     writeSpreadsheet,
@@ -34,6 +37,10 @@ export {
     getSheetData,
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,
+    calculateAutoWidths,
+    THEMES,
+    getTheme,
+    applyTheme,
     writeCSV,
     writeTSV,
     writeHTML,

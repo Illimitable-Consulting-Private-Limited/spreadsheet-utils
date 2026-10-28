@@ -7,6 +7,9 @@
   "module": "./dist/esm/index.mjs",
   "browser": "./dist/browser/spreadsheet-utils.min.js",
   "types": "./index.d.ts",
+  "bin": {
+    "spreadsheet-utils": "./bin/cli.js"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
@@ -42,6 +45,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "bin",
     "dist",
     "index.d.ts",
     "plugins.d.ts",

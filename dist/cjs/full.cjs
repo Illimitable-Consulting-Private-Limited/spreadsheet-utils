@@ -29,13 +29,21 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/full.js
 var full_exports = {};
 __export(full_exports, {
+  CSVTransformStream: () => CSVTransformStream,
   Email: () => Email,
   Integer: () => Integer,
   InvalidInputError: () => InvalidInputError,
   InvalidSpreadsheetError: () => InvalidSpreadsheetError,
+  JSONLTransformStream: () => JSONLTransformStream,
   SheetNotFoundError: () => SheetNotFoundError,
+  THEMES: () => THEMES,
   URL: () => URL,
   allPlugins: () => allPlugins,
+  applyTheme: () => applyTheme,
+  calculateAutoWidths: () => calculateAutoWidths,
+  convertRowsToObjects: () => convertRowsToObjects,
+  convertSpreadsheet: () => convertSpreadsheet,
+  createConverter: () => createConverter,
   createDBF: () => createDBF,
   createHTML: () => createHTML,
   createODS: () => createODS,
@@ -45,6 +53,7 @@ __export(full_exports, {
   default: () => full_default,
   detectFormat: () => detectFormat,
   getSheetData: () => getSheetData,
+  getTheme: () => getTheme,
   getWriterForExtension: () => getWriterForExtension,
   isPluginRegistered: () => isPluginRegistered,
   iterateSpreadsheet: () => iterateSpreadsheet,
@@ -61,6 +70,9 @@ __export(full_exports, {
   readSpreadsheet: () => readSpreadsheet,
   readXlsxFile: () => readXlsxFile,
   registerPlugin: () => registerPlugin,
+  streamCSV: () => streamCSV,
+  streamJSONL: () => streamJSONL,
+  streamTSV: () => streamTSV,
   tabularjs: () => tabularjs,
   textPlugin: () => textPlugin,
   unregisterPlugin: () => unregisterPlugin,
@@ -3658,6 +3670,197 @@ function normalizeSchemaToColumns(schema, options = {}) {
   }
   return [];
 }
+function getCellLength(cell) {
+  if (cell == null) return 0;
+  if (typeof cell === "object") {
+    if (cell instanceof Date) {
+      return 10;
+    }
+    if (cell.value !== void 0 && cell.value !== null) {
+      return getCellLength(cell.value);
+    }
+    return 0;
+  }
+  if (typeof cell === "number") {
+    return String(cell).length;
+  }
+  if (typeof cell === "boolean") {
+    return cell ? 4 : 5;
+  }
+  const str = String(cell);
+  if (str.includes("\n")) {
+    const lines = str.split("\n");
+    let maxL = 0;
+    for (const line of lines) {
+      if (line.length > maxL) maxL = line.length;
+    }
+    return maxL;
+  }
+  return str.length;
+}
+function calculateAutoWidths(rows, options = {}, existingColumns = null) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return existingColumns || [];
+  }
+  const autoWidthConfig = typeof options.autoWidth === "object" && options.autoWidth !== null ? options.autoWidth : {};
+  const minWidth = autoWidthConfig.minWidth ?? options.minWidth ?? 8;
+  const maxWidth = autoWidthConfig.maxWidth ?? options.maxWidth ?? 40;
+  const padding = autoWidthConfig.padding ?? options.padding ?? 2;
+  const force = autoWidthConfig.force === true;
+  let numCols = 0;
+  if (Array.isArray(existingColumns)) {
+    numCols = existingColumns.length;
+  }
+  for (const row of rows) {
+    if (Array.isArray(row) && row.length > numCols) {
+      numCols = row.length;
+    }
+  }
+  if (numCols === 0) return existingColumns || [];
+  const colWidths = new Array(numCols).fill(0);
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const len = getCellLength(row[c]);
+      if (len > colWidths[c]) {
+        colWidths[c] = len;
+      }
+    }
+  }
+  const result = [];
+  for (let c = 0; c < numCols; c++) {
+    const existingCol = existingColumns && existingColumns[c] ? { ...existingColumns[c] } : {};
+    if (!force && existingCol.width != null) {
+      result.push(existingCol);
+    } else {
+      const calculated = Math.max(minWidth, Math.min(maxWidth, colWidths[c] + padding));
+      existingCol.width = calculated;
+      result.push(existingCol);
+    }
+  }
+  return result;
+}
+
+// src/write/themes.js
+var THEMES = {
+  ocean: {
+    name: "ocean",
+    header: {
+      backgroundColor: "#1B365D",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F0F4F8"
+    },
+    borderColor: "#E2E8F0"
+  },
+  forest: {
+    name: "forest",
+    header: {
+      backgroundColor: "#1B4332",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#D8F3DC",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F2F9F4"
+    },
+    borderColor: "#E0EFE6"
+  },
+  slate: {
+    name: "slate",
+    header: {
+      backgroundColor: "#334155",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F8FAFC"
+    },
+    borderColor: "#E2E8F0"
+  },
+  sunset: {
+    name: "sunset",
+    header: {
+      backgroundColor: "#9C4123",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#FED7AA",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#FFF7ED"
+    },
+    borderColor: "#FEE2E2"
+  },
+  striped: {
+    name: "striped",
+    header: {
+      backgroundColor: "#475569",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F1F5F9"
+    },
+    borderColor: "#E2E8F0"
+  }
+};
+function getTheme(theme) {
+  if (!theme) return null;
+  if (typeof theme === "string") {
+    const key = theme.toLowerCase().trim();
+    return THEMES[key] || null;
+  }
+  if (typeof theme === "object") {
+    return theme;
+  }
+  return null;
+}
+function applyTheme(rows, themeInput, options = {}) {
+  const theme = getTheme(themeInput);
+  if (!theme || !Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+  const hasHeader = options.hasHeader !== false;
+  const headerStyle = theme.header || {};
+  const alternateStyle = theme.alternateRow || {};
+  const zebra = options.zebra !== false && Boolean(alternateStyle.backgroundColor);
+  return rows.map((row, rIdx) => {
+    if (!Array.isArray(row)) return row;
+    const isHeader = hasHeader && rIdx === 0;
+    const isAlternate = !isHeader && zebra && (hasHeader ? rIdx % 2 === 0 : rIdx % 2 === 1);
+    return row.map((cell) => {
+      if (isHeader) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return { ...headerStyle, ...cell };
+        }
+        return { value: cell !== void 0 ? cell : null, ...headerStyle };
+      }
+      if (isAlternate) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return {
+            backgroundColor: alternateStyle.backgroundColor,
+            ...cell
+          };
+        }
+        return {
+          value: cell !== void 0 ? cell : null,
+          backgroundColor: alternateStyle.backgroundColor
+        };
+      }
+      return cell;
+    });
+  });
+}
 
 // src/write/getSheetData/getSheetData.js
 function getSheetData(objects, columns) {
@@ -3740,6 +3943,14 @@ function normalizeWorkbookSheets(data, options = {}) {
       rows: []
     }];
   }
+  sheets.forEach((sheet) => {
+    if (options.theme) {
+      sheet.rows = applyTheme(sheet.rows, options.theme, options);
+    }
+    if (options.autoWidth) {
+      sheet.columns = calculateAutoWidths(sheet.rows, options, sheet.columns);
+    }
+  });
   return sheets;
 }
 function formatBorderWidth(b) {
@@ -11833,17 +12044,42 @@ async function parseTabular(file, options = {}, context = {}) {
   }
   throw new Error(`Unsupported file type: ${ext || detected || fileName || "(buffer)"}`);
 }
+function convertRowsToObjects(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const headers = (rows[0] || []).map((h, i) => {
+    let base = h != null ? String(h).trim() : "";
+    if (!base) base = `column${i + 1}`;
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+    }
+    result.push(obj);
+  }
+  return result;
+}
 async function readSpreadsheet(file, options = {}, context = {}) {
   const tabularResult = await parseTabular(file, options, context);
   const worksheets = tabularResult.worksheets || [];
   if (options.format === "tabular" || options.worksheets === true) {
     return tabularResult;
   }
+  const asObjects = options.asObjects === true || options.header === true;
   if (options.allSheets === true) {
-    return worksheets.map((ws, i) => ({
-      name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-      data: ws.data || []
-    }));
+    return worksheets.map((ws, i) => {
+      const sheetData = ws.data || [];
+      return {
+        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+      };
+    });
   }
   let selectedWorksheet = worksheets[0];
   if (options.sheet !== void 0) {
@@ -11876,6 +12112,9 @@ async function readSpreadsheet(file, options = {}, context = {}) {
   if (options.schema) {
     return parseSheetData(data, options.schema, options);
   }
+  if (asObjects) {
+    return convertRowsToObjects(data);
+  }
   return data;
 }
 async function* iterateSpreadsheet(file, options = {}, context = {}) {
@@ -11883,10 +12122,34 @@ async function* iterateSpreadsheet(file, options = {}, context = {}) {
   let resolveNext = null;
   let finished = false;
   let parseError = null;
+  const asObjects = options.asObjects === true || options.header === true;
+  let headers = null;
   const streamingOptions = {
     ...options,
+    // Override asObjects in the inner read so onRow receives raw rows
+    asObjects: false,
+    header: false,
     onRow: (row, rowIndex) => {
-      rowQueue.push(row);
+      if (asObjects) {
+        if (headers === null) {
+          const seen = /* @__PURE__ */ new Map();
+          headers = (row || []).map((h, i) => {
+            let base = h != null ? String(h).trim() : "";
+            if (!base) base = `column${i + 1}`;
+            const count = seen.get(base) || 0;
+            seen.set(base, count + 1);
+            return count > 0 ? `${base}_${count + 1}` : base;
+          });
+          return;
+        }
+        const obj = {};
+        for (let c = 0; c < headers.length; c++) {
+          obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+        }
+        rowQueue.push(obj);
+      } else {
+        rowQueue.push(row);
+      }
       if (resolveNext) {
         const cb = resolveNext;
         resolveNext = null;
@@ -12008,6 +12271,63 @@ function readSheet(input, sheet, options) {
 var readXlsxFile = readSpreadsheet;
 var tabularjs = parseTabular;
 var parser2 = parseTabular;
+
+// src/core/convert-base.js
+function createConverter(writer) {
+  return async function convertSpreadsheet2(input, output, options = {}) {
+    let destPath = null;
+    let conversionOptions = {};
+    if (typeof output === "string") {
+      destPath = output;
+      conversionOptions = { ...options, filePath: destPath };
+    } else if (typeof output === "object" && output !== null) {
+      conversionOptions = { ...options, ...output };
+      destPath = conversionOptions.filePath || conversionOptions.fileName || null;
+    } else {
+      conversionOptions = { ...options };
+    }
+    let targetFormat = conversionOptions.to || conversionOptions.format || conversionOptions.outputFormat;
+    if (!targetFormat && destPath) {
+      const ext = destPath.split(".").pop().toLowerCase();
+      if (ext) targetFormat = ext;
+    }
+    if (!targetFormat) {
+      targetFormat = "xlsx";
+    }
+    const readOptions = { ...conversionOptions };
+    delete readOptions.format;
+    delete readOptions.to;
+    delete readOptions.outputFormat;
+    delete readOptions.buffer;
+    delete readOptions.blob;
+    if (conversionOptions.from) {
+      readOptions.format = conversionOptions.from;
+    } else if (conversionOptions.inputFormat) {
+      readOptions.format = conversionOptions.inputFormat;
+    }
+    const writeOptions = {
+      ...conversionOptions,
+      format: targetFormat
+    };
+    const multiSheetWriters = /* @__PURE__ */ new Set(["xlsx", "ods", "xls", "json"]);
+    const canWriteMultiSheet = multiSheetWriters.has(targetFormat.toLowerCase());
+    let dataToWrite;
+    if (conversionOptions.sheet !== void 0) {
+      dataToWrite = await readSpreadsheet(input, { ...readOptions, sheet: conversionOptions.sheet });
+    } else {
+      const tabular = await parseTabular(input, readOptions);
+      const worksheets = tabular.worksheets || [];
+      if (worksheets.length > 1 && canWriteMultiSheet) {
+        dataToWrite = tabular;
+      } else if (worksheets.length > 0) {
+        dataToWrite = worksheets[0].data || [];
+      } else {
+        dataToWrite = [];
+      }
+    }
+    return await writer(dataToWrite, writeOptions);
+  };
+}
 
 // src/write/export/writeXlsxFileNode.js
 var import_node_fs5 = __toESM(require("node:fs"), 1);
@@ -15240,6 +15560,12 @@ function createHTML(data, options = {}) {
   } else if (Array.isArray(data)) {
     rows = data;
   }
+  if (options.theme) {
+    rows = applyTheme(rows, options.theme, options);
+  }
+  if (options.autoWidth) {
+    columns = calculateAutoWidths(rows, options, columns);
+  }
   const tableClass = options.tableClass || "spreadsheet-table";
   let html = `<table class="${tableClass}">
 `;
@@ -15384,6 +15710,91 @@ async function writeJSON(data, options = {}) {
   return jsonString;
 }
 
+// src/write/streaming.js
+var import_node_fs7 = __toESM(require("node:fs"), 1);
+var import_node_stream5 = require("node:stream");
+function formatCSVLine(cells, delimiter = ",") {
+  if (!Array.isArray(cells)) return "";
+  return cells.map((cell) => {
+    const val = cell && typeof cell === "object" && !(cell instanceof Date) && "value" in cell ? cell.value : cell;
+    if (val === null || val === void 0) return "";
+    if (val instanceof Date) return val.toISOString();
+    const str = String(val);
+    if (str.includes(delimiter) || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }).join(delimiter);
+}
+var CSVTransformStream = class extends import_node_stream5.Transform {
+  constructor(options = {}) {
+    super({ objectMode: true });
+    this.delimiter = options.delimiter || ",";
+    this.hasHeader = options.hasHeader ?? true;
+    this.headers = options.headers || null;
+    this.headerEmitted = false;
+  }
+  _transform(chunk, encoding, callback) {
+    try {
+      if (Array.isArray(chunk)) {
+        this.push(formatCSVLine(chunk, this.delimiter) + "\n");
+      } else if (chunk && typeof chunk === "object") {
+        if (!this.headerEmitted && this.hasHeader) {
+          const keys2 = this.headers || Object.keys(chunk);
+          this.push(formatCSVLine(keys2, this.delimiter) + "\n");
+          this.headerEmitted = true;
+        }
+        const keys = this.headers || Object.keys(chunk);
+        const values = keys.map((k) => chunk[k]);
+        this.push(formatCSVLine(values, this.delimiter) + "\n");
+      }
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+};
+var JSONLTransformStream = class extends import_node_stream5.Transform {
+  constructor(options = {}) {
+    super({ objectMode: true });
+  }
+  _transform(chunk, encoding, callback) {
+    try {
+      this.push(JSON.stringify(chunk) + "\n");
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+};
+function runPipeline(readable, transform4, writable) {
+  return new Promise((resolve, reject) => {
+    (0, import_node_stream5.pipeline)(readable, transform4, writable, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+async function streamCSV(source, destination, options = {}) {
+  const readable = source instanceof import_node_stream5.Readable ? source : import_node_stream5.Readable.from(source);
+  const transform4 = new CSVTransformStream(options);
+  const isPath = typeof destination === "string";
+  const writable = isPath ? import_node_fs7.default.createWriteStream(destination, { encoding: "utf-8" }) : destination;
+  await runPipeline(readable, transform4, writable);
+  return isPath ? destination : writable;
+}
+async function streamTSV(source, destination, options = {}) {
+  return streamCSV(source, destination, { ...options, delimiter: "	" });
+}
+async function streamJSONL(source, destination, options = {}) {
+  const readable = source instanceof import_node_stream5.Readable ? source : import_node_stream5.Readable.from(source);
+  const transform4 = new JSONLTransformStream(options);
+  const isPath = typeof destination === "string";
+  const writable = isPath ? import_node_fs7.default.createWriteStream(destination, { encoding: "utf-8" }) : destination;
+  await runPipeline(readable, transform4, writable);
+  return isPath ? destination : writable;
+}
+
 // src/write/index.js
 async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
   if (typeof options === "string") {
@@ -15457,6 +15868,26 @@ async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
       sheetOptions.columns = columns;
     }
   }
+  if (Array.isArray(inputData) && inputData.length > 0 && typeof inputData[0] === "object" && inputData[0] !== null && !Array.isArray(inputData[0]) && inputData[0].data) {
+    inputData = inputData.map((s) => {
+      let sData = s.data || [];
+      if (sheetOptions.theme) {
+        sData = applyTheme(sData, sheetOptions.theme, sheetOptions);
+      }
+      let sCols = s.columns;
+      if (sheetOptions.autoWidth) {
+        sCols = calculateAutoWidths(sData, sheetOptions, sCols);
+      }
+      return { ...s, data: sData, columns: sCols };
+    });
+  } else if (Array.isArray(inputData)) {
+    if (sheetOptions.theme) {
+      inputData = applyTheme(inputData, sheetOptions.theme, sheetOptions);
+    }
+    if (sheetOptions.autoWidth) {
+      sheetOptions.columns = calculateAutoWidths(inputData, sheetOptions, sheetOptions.columns);
+    }
+  }
   const writer = writeXlsxFile(inputData, sheetOptions, extraOptions);
   if (sheetOptions.filePath) {
     if (typeof writer.toFile === "function") {
@@ -15475,18 +15906,29 @@ async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
 }
 var writeXlsxFile2 = writeXlsxFile;
 
+// src/core/convert.js
+var convertSpreadsheet = createConverter(writeSpreadsheet);
+
 // src/full.js
 registerPlugin(...allPlugins);
 var full_default = readSpreadsheet;
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  CSVTransformStream,
   Email,
   Integer,
   InvalidInputError,
   InvalidSpreadsheetError,
+  JSONLTransformStream,
   SheetNotFoundError,
+  THEMES,
   URL,
   allPlugins,
+  applyTheme,
+  calculateAutoWidths,
+  convertRowsToObjects,
+  convertSpreadsheet,
+  createConverter,
   createDBF,
   createHTML,
   createODS,
@@ -15495,6 +15937,7 @@ var full_default = readSpreadsheet;
   dbfPlugin,
   detectFormat,
   getSheetData,
+  getTheme,
   getWriterForExtension,
   isPluginRegistered,
   iterateSpreadsheet,
@@ -15511,6 +15954,9 @@ var full_default = readSpreadsheet;
   readSpreadsheet,
   readXlsxFile,
   registerPlugin,
+  streamCSV,
+  streamJSONL,
+  streamTSV,
   tabularjs,
   textPlugin,
   unregisterPlugin,

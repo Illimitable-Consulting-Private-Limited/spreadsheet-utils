@@ -27,6 +27,9 @@ export {
     allPlugins
 };
 
+// Converter export
+export { convertSpreadsheet, createConverter } from './core/convert.js';
+
 // Writer exports
 export {
     writeSpreadsheet,
@@ -34,6 +37,15 @@ export {
     getSheetData,
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,
+    calculateAutoWidths,
+    THEMES,
+    getTheme,
+    applyTheme,
+    streamCSV,
+    streamTSV,
+    streamJSONL,
+    CSVTransformStream,
+    JSONLTransformStream,
     writeCSV,
     writeTSV,
     writeHTML,

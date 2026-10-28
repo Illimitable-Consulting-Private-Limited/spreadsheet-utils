@@ -3850,6 +3850,197 @@ function normalizeSchemaToColumns(schema, options = {}) {
   }
   return [];
 }
+function getCellLength(cell) {
+  if (cell == null) return 0;
+  if (typeof cell === "object") {
+    if (cell instanceof Date) {
+      return 10;
+    }
+    if (cell.value !== void 0 && cell.value !== null) {
+      return getCellLength(cell.value);
+    }
+    return 0;
+  }
+  if (typeof cell === "number") {
+    return String(cell).length;
+  }
+  if (typeof cell === "boolean") {
+    return cell ? 4 : 5;
+  }
+  const str = String(cell);
+  if (str.includes("\n")) {
+    const lines = str.split("\n");
+    let maxL = 0;
+    for (const line of lines) {
+      if (line.length > maxL) maxL = line.length;
+    }
+    return maxL;
+  }
+  return str.length;
+}
+function calculateAutoWidths(rows, options = {}, existingColumns = null) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return existingColumns || [];
+  }
+  const autoWidthConfig = typeof options.autoWidth === "object" && options.autoWidth !== null ? options.autoWidth : {};
+  const minWidth = autoWidthConfig.minWidth ?? options.minWidth ?? 8;
+  const maxWidth = autoWidthConfig.maxWidth ?? options.maxWidth ?? 40;
+  const padding = autoWidthConfig.padding ?? options.padding ?? 2;
+  const force = autoWidthConfig.force === true;
+  let numCols = 0;
+  if (Array.isArray(existingColumns)) {
+    numCols = existingColumns.length;
+  }
+  for (const row of rows) {
+    if (Array.isArray(row) && row.length > numCols) {
+      numCols = row.length;
+    }
+  }
+  if (numCols === 0) return existingColumns || [];
+  const colWidths = new Array(numCols).fill(0);
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const len = getCellLength(row[c]);
+      if (len > colWidths[c]) {
+        colWidths[c] = len;
+      }
+    }
+  }
+  const result = [];
+  for (let c = 0; c < numCols; c++) {
+    const existingCol = existingColumns && existingColumns[c] ? { ...existingColumns[c] } : {};
+    if (!force && existingCol.width != null) {
+      result.push(existingCol);
+    } else {
+      const calculated = Math.max(minWidth, Math.min(maxWidth, colWidths[c] + padding));
+      existingCol.width = calculated;
+      result.push(existingCol);
+    }
+  }
+  return result;
+}
+
+// src/write/themes.js
+var THEMES = {
+  ocean: {
+    name: "ocean",
+    header: {
+      backgroundColor: "#1B365D",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F0F4F8"
+    },
+    borderColor: "#E2E8F0"
+  },
+  forest: {
+    name: "forest",
+    header: {
+      backgroundColor: "#1B4332",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#D8F3DC",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F2F9F4"
+    },
+    borderColor: "#E0EFE6"
+  },
+  slate: {
+    name: "slate",
+    header: {
+      backgroundColor: "#334155",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F8FAFC"
+    },
+    borderColor: "#E2E8F0"
+  },
+  sunset: {
+    name: "sunset",
+    header: {
+      backgroundColor: "#9C4123",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#FED7AA",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#FFF7ED"
+    },
+    borderColor: "#FEE2E2"
+  },
+  striped: {
+    name: "striped",
+    header: {
+      backgroundColor: "#475569",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F1F5F9"
+    },
+    borderColor: "#E2E8F0"
+  }
+};
+function getTheme(theme) {
+  if (!theme) return null;
+  if (typeof theme === "string") {
+    const key = theme.toLowerCase().trim();
+    return THEMES[key] || null;
+  }
+  if (typeof theme === "object") {
+    return theme;
+  }
+  return null;
+}
+function applyTheme(rows, themeInput, options = {}) {
+  const theme = getTheme(themeInput);
+  if (!theme || !Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+  const hasHeader = options.hasHeader !== false;
+  const headerStyle = theme.header || {};
+  const alternateStyle = theme.alternateRow || {};
+  const zebra = options.zebra !== false && Boolean(alternateStyle.backgroundColor);
+  return rows.map((row, rIdx) => {
+    if (!Array.isArray(row)) return row;
+    const isHeader = hasHeader && rIdx === 0;
+    const isAlternate = !isHeader && zebra && (hasHeader ? rIdx % 2 === 0 : rIdx % 2 === 1);
+    return row.map((cell) => {
+      if (isHeader) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return { ...headerStyle, ...cell };
+        }
+        return { value: cell !== void 0 ? cell : null, ...headerStyle };
+      }
+      if (isAlternate) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return {
+            backgroundColor: alternateStyle.backgroundColor,
+            ...cell
+          };
+        }
+        return {
+          value: cell !== void 0 ? cell : null,
+          backgroundColor: alternateStyle.backgroundColor
+        };
+      }
+      return cell;
+    });
+  });
+}
 
 // src/write/formats.js
 import fs5 from "node:fs";
@@ -3918,6 +4109,14 @@ function normalizeWorkbookSheets(data, options = {}) {
       rows: []
     }];
   }
+  sheets.forEach((sheet) => {
+    if (options.theme) {
+      sheet.rows = applyTheme(sheet.rows, options.theme, options);
+    }
+    if (options.autoWidth) {
+      sheet.columns = calculateAutoWidths(sheet.rows, options, sheet.columns);
+    }
+  });
   return sheets;
 }
 function formatBorderWidth(b) {
@@ -4976,6 +5175,12 @@ function createHTML(data, options = {}) {
   } else if (Array.isArray(data)) {
     rows = data;
   }
+  if (options.theme) {
+    rows = applyTheme(rows, options.theme, options);
+  }
+  if (options.autoWidth) {
+    columns = calculateAutoWidths(rows, options, columns);
+  }
   const tableClass = options.tableClass || "spreadsheet-table";
   let html = `<table class="${tableClass}">
 `;
@@ -5120,6 +5325,91 @@ async function writeJSON(data, options = {}) {
   return jsonString;
 }
 
+// src/write/streaming.js
+import fs6 from "node:fs";
+import { Readable, Transform, pipeline } from "node:stream";
+function formatCSVLine(cells, delimiter = ",") {
+  if (!Array.isArray(cells)) return "";
+  return cells.map((cell) => {
+    const val = cell && typeof cell === "object" && !(cell instanceof Date) && "value" in cell ? cell.value : cell;
+    if (val === null || val === void 0) return "";
+    if (val instanceof Date) return val.toISOString();
+    const str = String(val);
+    if (str.includes(delimiter) || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }).join(delimiter);
+}
+var CSVTransformStream = class extends Transform {
+  constructor(options = {}) {
+    super({ objectMode: true });
+    this.delimiter = options.delimiter || ",";
+    this.hasHeader = options.hasHeader ?? true;
+    this.headers = options.headers || null;
+    this.headerEmitted = false;
+  }
+  _transform(chunk, encoding, callback) {
+    try {
+      if (Array.isArray(chunk)) {
+        this.push(formatCSVLine(chunk, this.delimiter) + "\n");
+      } else if (chunk && typeof chunk === "object") {
+        if (!this.headerEmitted && this.hasHeader) {
+          const keys2 = this.headers || Object.keys(chunk);
+          this.push(formatCSVLine(keys2, this.delimiter) + "\n");
+          this.headerEmitted = true;
+        }
+        const keys = this.headers || Object.keys(chunk);
+        const values = keys.map((k) => chunk[k]);
+        this.push(formatCSVLine(values, this.delimiter) + "\n");
+      }
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+};
+var JSONLTransformStream = class extends Transform {
+  constructor(options = {}) {
+    super({ objectMode: true });
+  }
+  _transform(chunk, encoding, callback) {
+    try {
+      this.push(JSON.stringify(chunk) + "\n");
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+};
+function runPipeline(readable, transform4, writable) {
+  return new Promise((resolve, reject) => {
+    pipeline(readable, transform4, writable, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+async function streamCSV(source, destination, options = {}) {
+  const readable = source instanceof Readable ? source : Readable.from(source);
+  const transform4 = new CSVTransformStream(options);
+  const isPath = typeof destination === "string";
+  const writable = isPath ? fs6.createWriteStream(destination, { encoding: "utf-8" }) : destination;
+  await runPipeline(readable, transform4, writable);
+  return isPath ? destination : writable;
+}
+async function streamTSV(source, destination, options = {}) {
+  return streamCSV(source, destination, { ...options, delimiter: "	" });
+}
+async function streamJSONL(source, destination, options = {}) {
+  const readable = source instanceof Readable ? source : Readable.from(source);
+  const transform4 = new JSONLTransformStream(options);
+  const isPath = typeof destination === "string";
+  const writable = isPath ? fs6.createWriteStream(destination, { encoding: "utf-8" }) : destination;
+  await runPipeline(readable, transform4, writable);
+  return isPath ? destination : writable;
+}
+
 // src/core/registry.js
 var registeredWriters = /* @__PURE__ */ new Map();
 var KNOWN_PLUGIN_MAPPINGS = {
@@ -5244,6 +5534,26 @@ async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
       sheetOptions.columns = columns;
     }
   }
+  if (Array.isArray(inputData) && inputData.length > 0 && typeof inputData[0] === "object" && inputData[0] !== null && !Array.isArray(inputData[0]) && inputData[0].data) {
+    inputData = inputData.map((s) => {
+      let sData = s.data || [];
+      if (sheetOptions.theme) {
+        sData = applyTheme(sData, sheetOptions.theme, sheetOptions);
+      }
+      let sCols = s.columns;
+      if (sheetOptions.autoWidth) {
+        sCols = calculateAutoWidths(sData, sheetOptions, sCols);
+      }
+      return { ...s, data: sData, columns: sCols };
+    });
+  } else if (Array.isArray(inputData)) {
+    if (sheetOptions.theme) {
+      inputData = applyTheme(inputData, sheetOptions.theme, sheetOptions);
+    }
+    if (sheetOptions.autoWidth) {
+      sheetOptions.columns = calculateAutoWidths(inputData, sheetOptions, sheetOptions.columns);
+    }
+  }
   const writer = writeXlsxFile(inputData, sheetOptions, extraOptions);
   if (sheetOptions.filePath) {
     if (typeof writer.toFile === "function") {
@@ -5263,14 +5573,23 @@ async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
 var writeXlsxFile2 = writeXlsxFile;
 var write_default = writeSpreadsheet;
 export {
+  CSVTransformStream,
+  JSONLTransformStream,
+  THEMES,
+  applyTheme,
+  calculateAutoWidths,
   createDBF,
   createHTML,
   createODS,
   createXLS,
   write_default as default,
   getSheetData,
+  getTheme,
   normalizeSchemaToColumns,
   normalizeSchemaToDbfFields,
+  streamCSV,
+  streamJSONL,
+  streamTSV,
   writeCSV,
   writeDBF,
   writeHTML,

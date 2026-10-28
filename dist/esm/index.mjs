@@ -3457,17 +3457,42 @@ async function parseTabular(file, options = {}, context = {}) {
   }
   throw new Error(`Unsupported file type: ${ext || detected || fileName || "(buffer)"}`);
 }
+function convertRowsToObjects(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const headers = (rows[0] || []).map((h, i) => {
+    let base = h != null ? String(h).trim() : "";
+    if (!base) base = `column${i + 1}`;
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+    }
+    result.push(obj);
+  }
+  return result;
+}
 async function readSpreadsheet(file, options = {}, context = {}) {
   const tabularResult = await parseTabular(file, options, context);
   const worksheets = tabularResult.worksheets || [];
   if (options.format === "tabular" || options.worksheets === true) {
     return tabularResult;
   }
+  const asObjects = options.asObjects === true || options.header === true;
   if (options.allSheets === true) {
-    return worksheets.map((ws, i) => ({
-      name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-      data: ws.data || []
-    }));
+    return worksheets.map((ws, i) => {
+      const sheetData = ws.data || [];
+      return {
+        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+      };
+    });
   }
   let selectedWorksheet = worksheets[0];
   if (options.sheet !== void 0) {
@@ -3500,6 +3525,9 @@ async function readSpreadsheet(file, options = {}, context = {}) {
   if (options.schema) {
     return parseSheetData(data, options.schema, options);
   }
+  if (asObjects) {
+    return convertRowsToObjects(data);
+  }
   return data;
 }
 async function* iterateSpreadsheet(file, options = {}, context = {}) {
@@ -3507,10 +3535,34 @@ async function* iterateSpreadsheet(file, options = {}, context = {}) {
   let resolveNext = null;
   let finished = false;
   let parseError = null;
+  const asObjects = options.asObjects === true || options.header === true;
+  let headers = null;
   const streamingOptions = {
     ...options,
+    // Override asObjects in the inner read so onRow receives raw rows
+    asObjects: false,
+    header: false,
     onRow: (row, rowIndex) => {
-      rowQueue.push(row);
+      if (asObjects) {
+        if (headers === null) {
+          const seen = /* @__PURE__ */ new Map();
+          headers = (row || []).map((h, i) => {
+            let base = h != null ? String(h).trim() : "";
+            if (!base) base = `column${i + 1}`;
+            const count = seen.get(base) || 0;
+            seen.set(base, count + 1);
+            return count > 0 ? `${base}_${count + 1}` : base;
+          });
+          return;
+        }
+        const obj = {};
+        for (let c = 0; c < headers.length; c++) {
+          obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+        }
+        rowQueue.push(obj);
+      } else {
+        rowQueue.push(row);
+      }
       if (resolveNext) {
         const cb = resolveNext;
         resolveNext = null;
@@ -3639,6 +3691,7 @@ export {
   InvalidSpreadsheetError,
   SheetNotFoundError,
   URL,
+  convertRowsToObjects,
   createReader,
   readSpreadsheet as default,
   detectFormat,

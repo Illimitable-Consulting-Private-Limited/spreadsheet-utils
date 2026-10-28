@@ -26,10 +26,16 @@ Merges the streaming, low-memory SAX architecture of **[`read-excel-file`](https
 - [Streaming Row Consumer](#streaming-row-consumer)
   - [`iterateSpreadsheet` Async Generator](#iteratespreadsheet-async-generator)
   - [`onRow` Callback](#onrow-callback)
+- [Universal File Converter (`convertSpreadsheet`)](#universal-file-converter-convertspreadsheet)
+- [CLI Tool (`spreadsheet-utils`)](#cli-tool-spreadsheet-utils)
+- [Streaming Exporters for Massive Datasets](#streaming-exporters-for-massive-datasets)
 - [Background Thread Offloading (`spreadsheet-utils/worker`)](#background-thread-offloading-spreadsheet-utilsworker)
 - [Security & Malicious Input Hardening](#security--malicious-input-hardening)
 - [Schema Mapping & Data Validation](#schema-mapping--data-validation)
+  - [Auto-Object Reading (`asObjects: true`)](#auto-object-reading-asobjects-true)
 - [Styled Writer & Multi-Format Exporter](#styled-writer--multi-format-exporter)
+  - [Ready-to-Use Styling Themes](#ready-to-use-styling-themes)
+  - [Auto Column Widths with `maxWidth` Safeguard](#auto-column-widths-with-maxwidth-safeguard)
   - [Writing Styled XLSX Files](#writing-styled-xlsx-files)
   - [Writing Objects with Schema](#writing-objects-with-schema)
   - [Multi-Sheet Workbooks](#multi-sheet-workbooks)
@@ -253,6 +259,84 @@ console.log('Total:', totalSum);
 
 ---
 
+## Universal File Converter (`convertSpreadsheet`)
+
+Convert any spreadsheet file or buffer directly into another format with zero configuration. It automatically sniffs the input format and encodes to the target extension:
+
+```javascript
+import { convertSpreadsheet } from 'spreadsheet-utils/full';
+
+// 1. One-liner CSV to styled XLSX with theme and responsive widths
+await convertSpreadsheet('data.csv', 'report.xlsx', { theme: 'ocean', autoWidth: true });
+
+// 2. Convert legacy XLS to modern ODS
+await convertSpreadsheet('archive.xls', 'modern.ods');
+
+// 3. Export spreadsheet to standalone styled HTML document
+await convertSpreadsheet('sales.xlsx', 'report.html', { theme: 'forest', fullDocument: true });
+
+// 4. Memory buffer to buffer conversion (Node.js & Browser)
+const xlsxBuffer = await convertSpreadsheet(csvBuffer, {
+  from: 'csv',
+  format: 'xlsx',
+  buffer: true,
+  theme: 'slate'
+});
+```
+
+---
+
+## CLI Tool (`spreadsheet-utils`)
+
+`spreadsheet-utils` provides a command-line interface for inspecting, converting, and viewing spreadsheets directly from your terminal:
+
+```bash
+# Convert between any formats (xlsx, ods, xls, csv, tsv, dbf, html, json)
+spreadsheet-utils convert data.csv report.xlsx --theme ocean --auto-width
+
+# Inspect spreadsheet format, sheet count, sheet names, and dimensions
+spreadsheet-utils info workbook.xlsx
+
+# Pretty-print spreadsheet to terminal as a formatted table
+spreadsheet-utils cat data.xlsx --limit 25
+
+# Dump as JSON objects using first row as headers
+spreadsheet-utils cat data.xlsx --objects
+
+# Dump as CSV
+spreadsheet-utils cat data.xlsx --csv
+```
+
+---
+
+## Streaming Exporters for Massive Datasets
+
+Stream millions of rows from async iterators, database queries, or generators directly into CSV, TSV, or JSON Lines with **constant O(1) memory**:
+
+```javascript
+import { streamCSV, streamTSV, streamJSONL, iterateSpreadsheet } from 'spreadsheet-utils/full';
+
+// 1. Stream 500,000+ rows directly from XLSX to CSV with 0 memory bloat:
+await streamCSV(
+  iterateSpreadsheet('huge-dataset.xlsx'),
+  'output.csv'
+);
+
+// 2. Stream an async database cursor / generator to JSON Lines (JSONL):
+async function* fetchDatabaseRows() {
+  for await (const row of db.users.find()) {
+    yield { id: row._id, name: row.name, email: row.email };
+  }
+}
+
+await streamJSONL(fetchDatabaseRows(), 'users.jsonl');
+
+// 3. Stream to any Node.js Writable stream (HTTP response, process.stdout):
+await streamCSV(fetchDatabaseRows(), res, { delimiter: ',' });
+```
+
+---
+
 ## Background Thread Offloading (`spreadsheet-utils/worker`)
 
 Offload heavy spreadsheet parsing off the main thread:
@@ -357,9 +441,62 @@ console.log(rows);
 | `parse` | `(value) => any` | Custom value parser / transformer |
 | `oneOf` | `any[]` | Array of allowed values |
 
+### Auto-Object Reading (`asObjects: true`)
+
+If you don't need a formal schema and simply want an array of JavaScript objects mapped using the first row as property names:
+
+```javascript
+// Automatically maps the first row to object keys:
+const users = await readSpreadsheet('users.csv', { asObjects: true });
+// -> [ { USER_ID: '1', FULL_NAME: 'Alice', EMAIL_ADDRESS: 'alice@example.com' }, ... ]
+
+// Also supported when streaming row-by-row with iterateSpreadsheet:
+for await (const user of iterateSpreadsheet('large-file.xlsx', { asObjects: true })) {
+  console.log(user.FULL_NAME);
+}
+```
+
 ---
 
 ## Styled Writer & Multi-Format Exporter
+
+### Ready-to-Use Styling Themes
+
+Produce professionally designed spreadsheets with zero styling boilerplate. Themes render with **100% visual parity across Microsoft Excel, LibreOffice Calc, and HTML**:
+
+| Theme | Header Palette | Alternate Row (Zebra) | Best For |
+|---|---|---|---|
+| `'ocean'` | Navy `#1B365D`, white bold text | `#F0F4F8` | Corporate, finance, executive |
+| `'forest'` | Emerald `#1B4332`, white bold text | `#F2F9F4` | Environmental, growth, sales |
+| `'slate'` | Charcoal `#334155`, white bold text | `#F8FAFC` | Modern SaaS, technical, analytics |
+| `'sunset'` | Terracotta `#9C4123`, white bold text | `#FFF7ED` | Marketing, operations |
+| `'striped'` | Steel `#475569`, white bold text | `#F1F5F9` | Clean subtle alternating rows |
+
+```javascript
+await writeSpreadsheet(data, {
+  filePath: 'sales.xlsx',
+  theme: 'ocean',
+  autoWidth: true
+});
+```
+
+### Auto Column Widths with `maxWidth` Safeguard
+
+Automatically computes responsive column widths based on maximum content length across all rows. Includes a default safeguard `maxWidth: 40` to guarantee that long descriptions or multi-sentence paragraphs never stretch column widths or break sheet layouts:
+
+```javascript
+// Automatically size columns with safe bounds:
+await writeSpreadsheet(data, {
+  filePath: 'report.xlsx',
+  autoWidth: true // minWidth: 8, maxWidth: 40, padding: 2
+});
+
+// Or customize safeguards:
+await writeSpreadsheet(data, {
+  filePath: 'report.xlsx',
+  autoWidth: { minWidth: 10, maxWidth: 30, padding: 3 }
+});
+```
 
 Export styled spreadsheets with custom colors, fonts, borders, column widths, and format masks:
 

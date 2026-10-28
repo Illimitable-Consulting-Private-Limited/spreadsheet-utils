@@ -3708,17 +3708,42 @@ async function parseTabular(file, options = {}, context = {}) {
   }
   throw new Error(`Unsupported file type: ${ext || detected || fileName || "(buffer)"}`);
 }
+function convertRowsToObjects(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const headers = (rows[0] || []).map((h, i) => {
+    let base = h != null ? String(h).trim() : "";
+    if (!base) base = `column${i + 1}`;
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+    }
+    result.push(obj);
+  }
+  return result;
+}
 async function readSpreadsheet(file, options = {}, context = {}) {
   const tabularResult = await parseTabular(file, options, context);
   const worksheets = tabularResult.worksheets || [];
   if (options.format === "tabular" || options.worksheets === true) {
     return tabularResult;
   }
+  const asObjects = options.asObjects === true || options.header === true;
   if (options.allSheets === true) {
-    return worksheets.map((ws, i) => ({
-      name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-      data: ws.data || []
-    }));
+    return worksheets.map((ws, i) => {
+      const sheetData = ws.data || [];
+      return {
+        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+      };
+    });
   }
   let selectedWorksheet = worksheets[0];
   if (options.sheet !== void 0) {
@@ -3750,6 +3775,9 @@ async function readSpreadsheet(file, options = {}, context = {}) {
   }
   if (options.schema) {
     return parseSheetData(data, options.schema, options);
+  }
+  if (asObjects) {
+    return convertRowsToObjects(data);
   }
   return data;
 }
@@ -6903,6 +6931,197 @@ function normalizeSchemaToColumns(schema, options = {}) {
   }
   return [];
 }
+function getCellLength(cell) {
+  if (cell == null) return 0;
+  if (typeof cell === "object") {
+    if (cell instanceof Date) {
+      return 10;
+    }
+    if (cell.value !== void 0 && cell.value !== null) {
+      return getCellLength(cell.value);
+    }
+    return 0;
+  }
+  if (typeof cell === "number") {
+    return String(cell).length;
+  }
+  if (typeof cell === "boolean") {
+    return cell ? 4 : 5;
+  }
+  const str = String(cell);
+  if (str.includes("\n")) {
+    const lines = str.split("\n");
+    let maxL = 0;
+    for (const line of lines) {
+      if (line.length > maxL) maxL = line.length;
+    }
+    return maxL;
+  }
+  return str.length;
+}
+function calculateAutoWidths(rows, options = {}, existingColumns = null) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return existingColumns || [];
+  }
+  const autoWidthConfig = typeof options.autoWidth === "object" && options.autoWidth !== null ? options.autoWidth : {};
+  const minWidth = autoWidthConfig.minWidth ?? options.minWidth ?? 8;
+  const maxWidth = autoWidthConfig.maxWidth ?? options.maxWidth ?? 40;
+  const padding = autoWidthConfig.padding ?? options.padding ?? 2;
+  const force = autoWidthConfig.force === true;
+  let numCols = 0;
+  if (Array.isArray(existingColumns)) {
+    numCols = existingColumns.length;
+  }
+  for (const row of rows) {
+    if (Array.isArray(row) && row.length > numCols) {
+      numCols = row.length;
+    }
+  }
+  if (numCols === 0) return existingColumns || [];
+  const colWidths = new Array(numCols).fill(0);
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const len = getCellLength(row[c]);
+      if (len > colWidths[c]) {
+        colWidths[c] = len;
+      }
+    }
+  }
+  const result = [];
+  for (let c = 0; c < numCols; c++) {
+    const existingCol = existingColumns && existingColumns[c] ? { ...existingColumns[c] } : {};
+    if (!force && existingCol.width != null) {
+      result.push(existingCol);
+    } else {
+      const calculated = Math.max(minWidth, Math.min(maxWidth, colWidths[c] + padding));
+      existingCol.width = calculated;
+      result.push(existingCol);
+    }
+  }
+  return result;
+}
+
+// src/write/themes.js
+var THEMES = {
+  ocean: {
+    name: "ocean",
+    header: {
+      backgroundColor: "#1B365D",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F0F4F8"
+    },
+    borderColor: "#E2E8F0"
+  },
+  forest: {
+    name: "forest",
+    header: {
+      backgroundColor: "#1B4332",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#D8F3DC",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F2F9F4"
+    },
+    borderColor: "#E0EFE6"
+  },
+  slate: {
+    name: "slate",
+    header: {
+      backgroundColor: "#334155",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F8FAFC"
+    },
+    borderColor: "#E2E8F0"
+  },
+  sunset: {
+    name: "sunset",
+    header: {
+      backgroundColor: "#9C4123",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#FED7AA",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#FFF7ED"
+    },
+    borderColor: "#FEE2E2"
+  },
+  striped: {
+    name: "striped",
+    header: {
+      backgroundColor: "#475569",
+      color: "#FFFFFF",
+      fontWeight: "bold",
+      borderColor: "#CBD5E1",
+      borderStyle: "thin"
+    },
+    alternateRow: {
+      backgroundColor: "#F1F5F9"
+    },
+    borderColor: "#E2E8F0"
+  }
+};
+function getTheme(theme) {
+  if (!theme) return null;
+  if (typeof theme === "string") {
+    const key = theme.toLowerCase().trim();
+    return THEMES[key] || null;
+  }
+  if (typeof theme === "object") {
+    return theme;
+  }
+  return null;
+}
+function applyTheme(rows, themeInput, options = {}) {
+  const theme = getTheme(themeInput);
+  if (!theme || !Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+  const hasHeader = options.hasHeader !== false;
+  const headerStyle = theme.header || {};
+  const alternateStyle = theme.alternateRow || {};
+  const zebra = options.zebra !== false && Boolean(alternateStyle.backgroundColor);
+  return rows.map((row, rIdx) => {
+    if (!Array.isArray(row)) return row;
+    const isHeader = hasHeader && rIdx === 0;
+    const isAlternate = !isHeader && zebra && (hasHeader ? rIdx % 2 === 0 : rIdx % 2 === 1);
+    return row.map((cell) => {
+      if (isHeader) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return { ...headerStyle, ...cell };
+        }
+        return { value: cell !== void 0 ? cell : null, ...headerStyle };
+      }
+      if (isAlternate) {
+        if (cell && typeof cell === "object" && !(cell instanceof Date)) {
+          return {
+            backgroundColor: alternateStyle.backgroundColor,
+            ...cell
+          };
+        }
+        return {
+          value: cell !== void 0 ? cell : null,
+          backgroundColor: alternateStyle.backgroundColor
+        };
+      }
+      return cell;
+    });
+  });
+}
 
 // src/write/getSheetData/getSheetData.js
 function getSheetData(objects, columns) {
@@ -6985,6 +7204,14 @@ function normalizeWorkbookSheets(data, options = {}) {
       rows: []
     }];
   }
+  sheets.forEach((sheet) => {
+    if (options.theme) {
+      sheet.rows = applyTheme(sheet.rows, options.theme, options);
+    }
+    if (options.autoWidth) {
+      sheet.columns = calculateAutoWidths(sheet.rows, options, sheet.columns);
+    }
+  });
   return sheets;
 }
 function formatBorderWidth(b) {

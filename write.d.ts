@@ -50,6 +50,12 @@ export interface WriteSheetOptions {
     columns?: WriteColumn[];
     schema?: Schema | any[] | Record<string, any>;
     headerStyle?: CellStyle;
+    theme?: 'ocean' | 'forest' | 'slate' | 'sunset' | 'striped' | Record<string, any>;
+    zebra?: boolean;
+    autoWidth?: boolean | { minWidth?: number; maxWidth?: number; padding?: number; force?: boolean };
+    minWidth?: number;
+    maxWidth?: number;
+    padding?: number;
     hasHeader?: boolean;
     tableClass?: string;
     fullDocument?: boolean;
@@ -123,3 +129,18 @@ export function createXLS(data: any, options?: WriteSheetOptions | string): Uint
 export function getSheetData(objects: Record<string, any>[], columns: WriteColumn[]): WriteGrid;
 export function normalizeSchemaToColumns(schema: Schema | any[]): WriteColumn[];
 export function normalizeSchemaToDbfFields(schema?: any, data?: any, options?: any): DbfFieldDescriptor[];
+
+export function calculateAutoWidths(rows: any[][], options?: any, existingColumns?: WriteColumn[]): WriteColumn[];
+export const THEMES: Record<string, any>;
+export function getTheme(theme: string | object): any;
+export function applyTheme(rows: any[][], theme: string | object, options?: any): any[][];
+
+export function streamCSV(source: any, destination: any, options?: any): Promise<any>;
+export function streamTSV(source: any, destination: any, options?: any): Promise<any>;
+export function streamJSONL(source: any, destination: any, options?: any): Promise<any>;
+export class CSVTransformStream {
+    constructor(options?: any);
+}
+export class JSONLTransformStream {
+    constructor(options?: any);
+}

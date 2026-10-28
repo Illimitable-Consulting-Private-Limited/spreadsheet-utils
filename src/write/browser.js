@@ -1,6 +1,7 @@
 import writeXlsxFileBrowser from './export/writeXlsxFileBrowser.js';
 import getSheetData from './getSheetData/getSheetData.js';
-import { normalizeSchemaToColumns, normalizeSchemaToDbfFields } from './schema.js';
+import { normalizeSchemaToColumns, normalizeSchemaToDbfFields, calculateAutoWidths } from './schema.js';
+import { THEMES, getTheme, applyTheme } from './themes.js';
 import { normalizeTo2DArray, escapeCSVCell, createHTML } from './formats.js';
 import { createDBF } from './dbf.js';
 import { createODS } from './ods.js';
@@ -241,6 +242,28 @@ export async function writeSpreadsheet(data, options = {}, extraOptions = {}) {
         }
     }
 
+    // Apply theme and autoWidth across sheets or single sheet
+    if (Array.isArray(inputData) && inputData.length > 0 && typeof inputData[0] === 'object' && inputData[0] !== null && !Array.isArray(inputData[0]) && inputData[0].data) {
+        inputData = inputData.map(s => {
+            let sData = s.data || [];
+            if (sheetOptions.theme) {
+                sData = applyTheme(sData, sheetOptions.theme, sheetOptions);
+            }
+            let sCols = s.columns;
+            if (sheetOptions.autoWidth) {
+                sCols = calculateAutoWidths(sData, sheetOptions, sCols);
+            }
+            return { ...s, data: sData, columns: sCols };
+        });
+    } else if (Array.isArray(inputData)) {
+        if (sheetOptions.theme) {
+            inputData = applyTheme(inputData, sheetOptions.theme, sheetOptions);
+        }
+        if (sheetOptions.autoWidth) {
+            sheetOptions.columns = calculateAutoWidths(inputData, sheetOptions, sheetOptions.columns);
+        }
+    }
+
     const writer = writeXlsxFileBrowser(inputData, sheetOptions, extraOptions);
 
     if (sheetOptions.fileName) {
@@ -258,6 +281,10 @@ export {
     getSheetData,
     normalizeSchemaToColumns,
     normalizeSchemaToDbfFields,
+    calculateAutoWidths,
+    THEMES,
+    getTheme,
+    applyTheme,
     writeDBF,
     createDBF,
     writeODS,
