@@ -69,6 +69,39 @@ When merging upstream updates, ensure these core principles are preserved:
 
 ---
 
+## 2b. Local Additions and Edits Inside Synchronized Paths
+
+`scripts/sync-upstream.js` treats `src/write`, `src/parser`, `src/plugins`, `src/utils`, `src/xlsx`, `src/xml`, `src/schema`, `src/export` and `src/zip` as upstream territory. These are the local additions and edits in them; a sync must keep them (re-apply after taking upstream's version of the file).
+
+### `src/write` (write-excel-file @ 4.1.1)
+
+| File | Change |
+| :--- | :--- |
+| `src/write/xlsx/features/rowBreaks.js` | **New.** The `rowBreaks` sheet option (v1.1.0): a feature transform like `stickyRowsOrColumns.js` that inserts `<rowBreaks count manualBreakCount><brk id max="16383" man="1"/></rowBreaks>` by the sheet schema order (after `<pageSetup/>`/`<headerFooter/>`, before `<drawing/>`). Sorts, de-duplicates and validates (positive integers; otherwise throws). |
+| `src/write/xlsx/getFeatures.js` | **Edited.** Imports `rowBreaks` and pushes it after `stickyRowsOrColumns`. |
+
+### `src/zip` (read-excel-file @ 5.8.6)
+
+| File | Change |
+| :--- | :--- |
+| `src/zip/unzipFromArrayBuffer.js` | **Edited** (v1.1.0), two bugs. (1) `unzipFromArrayBufferUsingFunction()` called `.then` on the result even for the synchronous `unzipSync()`, so the sync path threw; it now honours `isAsync` (returns the files, throws `UnzipError` for a bad archive). (2) The async `unzipAsync()` ignored the options, so the `filter` and the `maxUncompressedSize` zip-bomb guard never applied in the browser/universal reader; the options (`{ filter }`) now go to fflate's `unzip()` / `unzipSync()`. |
+| `src/zip/unzipFromArrayBufferSync.js` | **Edited** (v1.1.0). Passes `isAsync: false`. |
+
+### `src/utils` and `src/parser` (tabularjs @ 0.0.12)
+
+| File | Change |
+| :--- | :--- |
+| `src/utils/loader.js` | **Edited** (v1.1.0). `import('fs')` goes through one `loadFs()` helper with a non-literal specifier and a stand-in that answers "no such file" when `fs` can't load, so the `browser-sync` entry bundles for the browser with a plain esbuild run. Behaviour in Node and in the other browser bundles is unchanged. |
+| `src/parser/odsCore.js` | **New name** (v1.1.0). The former `src/parser/ods.js`, unchanged except that `parseODS(input, options)` is now `parseODSWith(unzipArchive, input, options)` and the `zip-utils.js` import is gone, so the caller picks the unzip function (async for the main entries, synchronous for `browser-sync`). |
+| `src/parser/ods.js` | **New thin file** (v1.1.0). `parseODS(input, options)` = `parseODSWith(unzipArchive, ...)` with the async `unzipArchive` of `zip-utils.js`; same export as before. |
+
+### Outside the synchronized paths (not upstream, nothing to merge)
+
+* `src/browser-sync.js` and `src/sync/` (`unzipSync.js`, `parseXLSXSync.js`, `writeXlsxFileSync.js`): the `spreadsheet-utils/browser-sync` entry. It uses `fflate`'s `zipSync()` / `unzipSync()` only, so no Worker is started (fflate's async `zip()` / `unzip()` start a `blob:` Worker for larger files, which a Content Security Policy without `worker-src` blocks). It imports unpackers and parsers from the synchronized paths; if an upstream sync renames `validateLeadingBytes`, `filterZipArchiveEntry`, `parseSpreadsheetContents`, `parseXLSBuffer` or `generateXlsxFileContents`, update those imports. `test/integration/browser-sync.test.js` fails on any `Worker` in the entry's bundle.
+* `src/core/shapeReadResult.js`: the sheet selection / `allSheets` / `asObjects` / `schema` part of `readSpreadsheet()`, moved out of `src/core/dispatcher.js` so the `browser-sync` reader shares it.
+
+---
+
 ## 3. Synchronization CLI Tool
 
 `scripts/sync-upstream.js` provides automation to check and sync upstream repositories:

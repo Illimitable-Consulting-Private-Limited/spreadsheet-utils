@@ -141,6 +141,17 @@ function isPluginRegistered(name) {
 // src/utils/loader.js
 var fs = null;
 var iconv = null;
+var FS_MODULE = "fs";
+async function loadFs() {
+  if (fs) return;
+  try {
+    fs = await import(FS_MODULE);
+  } catch {
+    fs = { existsSync: () => false, readFileSync: () => {
+      throw new Error("File system access is not available");
+    } };
+  }
+}
 async function loadAsBuffer(input) {
   if (input instanceof Uint8Array) return input;
   if (typeof ArrayBuffer !== "undefined" && input instanceof ArrayBuffer) {
@@ -150,7 +161,7 @@ async function loadAsBuffer(input) {
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
   }
   if (typeof input === "string") {
-    if (!fs) fs = await import("fs");
+    await loadFs();
     if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
       try {
         if (fs.existsSync(input)) {
@@ -181,7 +192,7 @@ async function loadAsString(input, encoding = "utf-8") {
   const enc = (encoding || "utf-8").toLowerCase();
   if (enc === "utf-8" || enc === "utf8") {
     if (typeof input === "string") {
-      if (!fs) fs = await import("fs");
+      await loadFs();
       if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
         try {
           if (fs.existsSync(input)) {
@@ -216,7 +227,7 @@ async function detectEncoding(input) {
     const chardet = await import("chardet");
     let buffer;
     if (typeof input === "string") {
-      if (!fs) fs = await import("fs");
+      await loadFs();
       buffer = fs.readFileSync(input);
     } else if (input instanceof Uint8Array) {
       buffer = Buffer.from(input);
@@ -5181,7 +5192,7 @@ function parser(html, options) {
   return finalResult;
 }
 
-// src/parser/ods.js
+// src/parser/odsCore.js
 function parseNumberFormat(node) {
   if (!node || !node.children) return null;
   const attrs = parseAttributes(node);
@@ -5811,10 +5822,10 @@ function parseTable(tableNode, styles, numberFormats, tableStyles = {}) {
   result.minDimensions = [maxCol + 1, result.data.length];
   return result;
 }
-async function parseODS(input, options = {}) {
+async function parseODSWith(unzipArchive2, input, options = {}) {
   return parse(async (inp) => {
     const buffer = await loadAsBuffer(inp);
-    const files2 = await unzipArchive(buffer, {
+    const files2 = await unzipArchive2(buffer, {
       filter: (name) => name === "content.xml" || name === "styles.xml" || name === "settings.xml"
     });
     const contentBytes = files2["content.xml"];
@@ -6066,6 +6077,11 @@ async function parseODS(input, options = {}) {
     }
     return result;
   }, input, options);
+}
+
+// src/parser/ods.js
+async function parseODS(input, options = {}) {
+  return parseODSWith(unzipArchive, input, options);
 }
 
 // src/parser/table.js
@@ -10843,7 +10859,7 @@ function unzipFromArrayBufferUsingFunction(input, options = {}, unzip3, isAsync)
   const filter = options.filter;
   const maxBytes = options.maxUncompressedSize || options.maxBytes || 256 * 1024 * 1024;
   let totalUncompressed = 0;
-  return unzip3(new Uint8Array(input), {
+  const unzipOptions = {
     // Ignore certain types of files and protect against zip bombs
     filter: (file) => {
       if (filter) {
@@ -10859,20 +10875,31 @@ function unzipFromArrayBufferUsingFunction(input, options = {}, unzip3, isAsync)
       }
       return true;
     }
-  }).then(
+  };
+  const convertError = (error) => {
+    if (isFlateError(error)) {
+      return createUnzipError(error);
+    }
+    return error;
+  };
+  const archive = new Uint8Array(input);
+  if (!isAsync) {
+    try {
+      return unzip3(archive, unzipOptions);
+    } catch (error) {
+      throw convertError(error);
+    }
+  }
+  return Promise.resolve().then(() => unzip3(archive, unzipOptions)).then(
     (result) => result,
     (error) => {
-      if (isFlateError(error)) {
-        throw createUnzipError(error);
-      } else {
-        throw error;
-      }
+      throw convertError(error);
     }
   );
 }
-function unzipAsync(archive) {
+function unzipAsync(archive, options) {
   return new Promise((resolve, reject) => {
-    unzip2(archive, (error, files2) => {
+    unzip2(archive, options, (error, files2) => {
       if (error) {
         reject(error);
       } else {
@@ -11912,6 +11939,80 @@ function applyDefaultOptions(options) {
 }
 var PARSED_OBJECT_TREE_START = {};
 
+// src/core/shapeReadResult.js
+function convertRowsToObjects(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const headers = (rows[0] || []).map((h, i) => {
+    let base = h != null ? String(h).trim() : "";
+    if (!base) base = `column${i + 1}`;
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+    }
+    result.push(obj);
+  }
+  return result;
+}
+function shapeReadResult(tabularResult, options = {}) {
+  const worksheets = tabularResult.worksheets || [];
+  if (options.format === "tabular" || options.worksheets === true) {
+    return tabularResult;
+  }
+  const asObjects = options.asObjects === true || options.header === true;
+  if (options.allSheets === true) {
+    return worksheets.map((ws, i) => {
+      const sheetData = ws.data || [];
+      return {
+        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+      };
+    });
+  }
+  let selectedWorksheet = worksheets[0];
+  if (options.sheet !== void 0) {
+    if (typeof options.sheet === "number") {
+      const index = options.sheet - 1;
+      if (index < 0 || index >= worksheets.length) {
+        throw new Error(`Sheet not found: ${options.sheet}`);
+      }
+      selectedWorksheet = worksheets[index];
+    } else if (typeof options.sheet === "string") {
+      const found = worksheets.find(
+        (ws) => (ws.worksheetName || ws.sheet) === options.sheet
+      );
+      if (!found) {
+        throw new Error(`Sheet not found: "${options.sheet}"`);
+      }
+      selectedWorksheet = found;
+    }
+  }
+  let data = selectedWorksheet && selectedWorksheet.data ? selectedWorksheet.data : [];
+  if (options.maxColumns && data.length > 0) {
+    data = data.map((r) => r.length > options.maxColumns ? r.slice(0, options.maxColumns) : r);
+  }
+  if (options.maxRows && data.length > options.maxRows) {
+    data = data.slice(0, options.maxRows);
+  }
+  if (typeof options.onRow === "function") {
+    data.forEach((row, i) => options.onRow(row, i));
+  }
+  if (options.schema) {
+    return parseSheetData(data, options.schema, options);
+  }
+  if (asObjects) {
+    return convertRowsToObjects(data);
+  }
+  return data;
+}
+
 // src/core/dispatcher.js
 function dispatch(ext, file, options = {}, context = {}) {
   const key = (ext || "").toLowerCase().replace(/^\./, "");
@@ -12001,78 +12102,9 @@ async function parseTabular(file, options = {}, context = {}) {
   }
   throw new Error(`Unsupported file type: ${ext || detected || fileName || "(buffer)"}`);
 }
-function convertRowsToObjects(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-  const seen = /* @__PURE__ */ new Map();
-  const headers = (rows[0] || []).map((h, i) => {
-    let base = h != null ? String(h).trim() : "";
-    if (!base) base = `column${i + 1}`;
-    const count = seen.get(base) || 0;
-    seen.set(base, count + 1);
-    return count > 0 ? `${base}_${count + 1}` : base;
-  });
-  const result = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const obj = {};
-    for (let c = 0; c < headers.length; c++) {
-      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
-    }
-    result.push(obj);
-  }
-  return result;
-}
 async function readSpreadsheet(file, options = {}, context = {}) {
   const tabularResult = await parseTabular(file, options, context);
-  const worksheets = tabularResult.worksheets || [];
-  if (options.format === "tabular" || options.worksheets === true) {
-    return tabularResult;
-  }
-  const asObjects = options.asObjects === true || options.header === true;
-  if (options.allSheets === true) {
-    return worksheets.map((ws, i) => {
-      const sheetData = ws.data || [];
-      return {
-        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
-      };
-    });
-  }
-  let selectedWorksheet = worksheets[0];
-  if (options.sheet !== void 0) {
-    if (typeof options.sheet === "number") {
-      const index = options.sheet - 1;
-      if (index < 0 || index >= worksheets.length) {
-        throw new Error(`Sheet not found: ${options.sheet}`);
-      }
-      selectedWorksheet = worksheets[index];
-    } else if (typeof options.sheet === "string") {
-      const found = worksheets.find(
-        (ws) => (ws.worksheetName || ws.sheet) === options.sheet
-      );
-      if (!found) {
-        throw new Error(`Sheet not found: "${options.sheet}"`);
-      }
-      selectedWorksheet = found;
-    }
-  }
-  let data = selectedWorksheet && selectedWorksheet.data ? selectedWorksheet.data : [];
-  if (options.maxColumns && data.length > 0) {
-    data = data.map((r) => r.length > options.maxColumns ? r.slice(0, options.maxColumns) : r);
-  }
-  if (options.maxRows && data.length > options.maxRows) {
-    data = data.slice(0, options.maxRows);
-  }
-  if (typeof options.onRow === "function") {
-    data.forEach((row, i) => options.onRow(row, i));
-  }
-  if (options.schema) {
-    return parseSheetData(data, options.schema, options);
-  }
-  if (asObjects) {
-    return convertRowsToObjects(data);
-  }
-  return data;
+  return shapeReadResult(tabularResult, options);
 }
 async function* iterateSpreadsheet(file, options = {}, context = {}) {
   const rowQueue = [];
@@ -12318,9 +12350,9 @@ function getAdditionalContent(fileName, features, sheetOptions, properties) {
   var content = "";
   for (var _iterator = _createForOfIteratorHelperLoose(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.insert) {
-      var insertedContent = transform4.insert(sheetOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.insert) {
+      var insertedContent = transform5.insert(sheetOptions, properties);
       if (insertedContent) {
         content += insertedContent;
       }
@@ -12357,9 +12389,9 @@ function _arrayLikeToArray2(r, a) {
 function transformContent(content, fileName, features, sheetOptions, properties) {
   for (var _iterator = _createForOfIteratorHelperLoose2(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.transform) {
-      content = transform4.transform(content, sheetOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.transform) {
+      content = transform5.transform(content, sheetOptions, properties);
     }
   }
   return content;
@@ -12465,9 +12497,9 @@ function _arrayLikeToArray3(r, a) {
 function getElementXml(fileName, tagName, attributes, innerXml, index, properties, sheetOptionsOrSheetsOptions, features) {
   for (var _iterator = _createForOfIteratorHelperLoose3(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.transformElementAttributes) {
-      attributes = transform4.transformElementAttributes(tagName, attributes || NO_ATTRIBUTES, index, sheetOptionsOrSheetsOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.transformElementAttributes) {
+      attributes = transform5.transformElementAttributes(tagName, attributes || NO_ATTRIBUTES, index, sheetOptionsOrSheetsOptions, properties);
     }
   }
   if (innerXml) {
@@ -14695,12 +14727,55 @@ function hasStickyRowsOrColumns(sheetOptions) {
   return Boolean(sheetOptions.stickyRowsCount) || Boolean(sheetOptions.stickyColumnsCount);
 }
 
+// src/write/xlsx/features/rowBreaks.js
+var LAST_COLUMN_INDEX = 16383;
+var rowBreaks_default = {
+  files: {
+    transform: {
+      "xl/worksheets/sheet{id}.xml": {
+        // Placed by the schema order of `<worksheet/>` children (after `<pageSetup/>` and `<headerFooter/>`,
+        // before `<drawing/>`), and `<drawing/>` is already in the XML by the time `transform()` runs.
+        transform: function transform4(xml, sheetOptions) {
+          var rows = normalizeRowBreaks(sheetOptions.rowBreaks);
+          if (rows.length === 0) {
+            return xml;
+          }
+          var breaksXml = rows.map(function(row) {
+            return '<brk id="' + row + '" max="' + LAST_COLUMN_INDEX + '" man="1"/>';
+          }).join("");
+          var elementXml = '<rowBreaks count="' + rows.length + '" manualBreakCount="' + rows.length + '">' + breaksXml + "</rowBreaks>";
+          return insertElementMarkupAccordingToOrderOfSiblings(xml, elementXml, getOrderOfSiblings("xl/worksheets/sheet{id}.xml", "worksheet"), "worksheet");
+        }
+      }
+    }
+  }
+};
+function normalizeRowBreaks(rowBreaks) {
+  if (rowBreaks === void 0 || rowBreaks === null) {
+    return [];
+  }
+  if (!Array.isArray(rowBreaks)) {
+    throw new Error("`rowBreaks` must be an array of 1-based row numbers");
+  }
+  rowBreaks.forEach(function(row) {
+    if (typeof row !== "number" || !Number.isInteger(row) || row < 1) {
+      throw new Error("`rowBreaks` must hold positive integers (1-based row numbers), got: " + String(row));
+    }
+  });
+  return rowBreaks.filter(function(row, i) {
+    return rowBreaks.indexOf(row) === i;
+  }).sort(function(a, b) {
+    return a - b;
+  });
+}
+
 // src/write/xlsx/getFeatures.js
 function getFeatures(customFeatures) {
   var features = [];
   features.push(conditionalFormatting_default);
   features.push(images_default);
   features.push(stickyRowsOrColumns_default);
+  features.push(rowBreaks_default);
   if (customFeatures) {
     customFeatures.forEach(validateFeature);
     features = features.concat(customFeatures);
@@ -15724,9 +15799,9 @@ var JSONLTransformStream = class extends Transform2 {
     }
   }
 };
-function runPipeline(readable, transform4, writable) {
+function runPipeline(readable, transform5, writable) {
   return new Promise((resolve, reject) => {
-    pipeline(readable, transform4, writable, (err) => {
+    pipeline(readable, transform5, writable, (err) => {
       if (err) reject(err);
       else resolve();
     });
@@ -15734,10 +15809,10 @@ function runPipeline(readable, transform4, writable) {
 }
 async function streamCSV(source, destination, options = {}) {
   const readable = source instanceof Readable2 ? source : Readable2.from(source);
-  const transform4 = new CSVTransformStream(options);
+  const transform5 = new CSVTransformStream(options);
   const isPath = typeof destination === "string";
   const writable = isPath ? fs8.createWriteStream(destination, { encoding: "utf-8" }) : destination;
-  await runPipeline(readable, transform4, writable);
+  await runPipeline(readable, transform5, writable);
   return isPath ? destination : writable;
 }
 async function streamTSV(source, destination, options = {}) {
@@ -15745,10 +15820,10 @@ async function streamTSV(source, destination, options = {}) {
 }
 async function streamJSONL(source, destination, options = {}) {
   const readable = source instanceof Readable2 ? source : Readable2.from(source);
-  const transform4 = new JSONLTransformStream(options);
+  const transform5 = new JSONLTransformStream(options);
   const isPath = typeof destination === "string";
   const writable = isPath ? fs8.createWriteStream(destination, { encoding: "utf-8" }) : destination;
-  await runPipeline(readable, transform4, writable);
+  await runPipeline(readable, transform5, writable);
   return isPath ? destination : writable;
 }
 

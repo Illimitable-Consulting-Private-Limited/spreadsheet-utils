@@ -136,6 +136,7 @@ npm install spreadsheet-utils
 | **`spreadsheet-utils/write`** | **Styled Writer & Exporter**: `writeSpreadsheet`, `writeXlsxFile`, `writeCSV`, `writeTSV`, `writeHTML`, `writeJSON` | **73 KB** |
 | **`spreadsheet-utils/full`** | **All-in-One**: Core reader + all format plugins pre-registered + styled writer | **192 KB** (~60 KB gzip) |
 | **`spreadsheet-utils/worker`** | **Worker Offloader**: `readInWorker` for background thread processing | Zero-setup worker thread |
+| **`spreadsheet-utils/browser-sync`** | **No-Worker Browser Entry**: read xlsx / xls / ods and write xlsx with synchronous `fflate`, for pages whose Content Security Policy blocks `blob:` Workers (ESM only) | **148 KB** (~48 KB gzip) |
 
 ---
 
@@ -592,6 +593,23 @@ const sheets = [
 await writeSpreadsheet(sheets, 'quarterly-report.xlsx');
 ```
 
+### XLSX Sheet Options
+
+Options that only the `.xlsx` writer reads. They go in the options of a single sheet, or in each sheet of the multi-sheet form.
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `rowBreaks` | `number[]` | `undefined` | Manual page breaks. Each number is a 1-based row a page break follows, so `[10, 20]` starts a new printed page at rows 11 and 21 (the meaning of ExcelJS's `row.addPageBreak()`). Sorted and de-duplicated; a value that is not a positive integer throws. Written as `<rowBreaks>` after `<pageSetup/>`. |
+
+```javascript
+await writeSpreadsheet(rows, { rowBreaks: [12, 24], filePath: 'report.xlsx' });
+
+await writeSpreadsheet([
+  { sheet: 'Gang A', data: rowsA, rowBreaks: [30] },
+  { sheet: 'Gang B', data: rowsB }
+], 'gangs.xlsx');
+```
+
 ### Multi-Format Exporter (`writeCSV`, `writeTSV`, `writeHTML`, `writeJSON`)
 
 In addition to `.xlsx`, export data to standard text and web formats:
@@ -897,6 +915,31 @@ Standalone browser bundles are available in `dist/browser/`. Include them direct
     // Write back and automatically trigger a browser download
     await window.spreadsheetUtilsFull.writeSpreadsheet(rows, 'converted.xlsx');
   }
+</script>
+```
+
+### Pages Under a Strict CSP (`spreadsheet-utils/browser-sync`)
+
+`fflate`'s asynchronous `zip()` and `unzip()` start a Web Worker from a `blob:` URL once a file is large (an archive over about 160 KB when writing, over about 512 KB when reading). A page whose Content Security Policy does not allow `blob:` Workers (`worker-src`, falling back to `child-src`, `script-src` and `default-src`) then fails on any big spreadsheet. Every other entry of this package contains that code.
+
+`spreadsheet-utils/browser-sync` uses `zipSync()` and `unzipSync()` only: neither its source nor its built file starts a Worker, whatever the file size. The price is that the work runs on the calling thread, so a very large file blocks the page for a moment. It reads `.xlsx`, `.xls` and `.ods` (no plugin registration), and writes `.xlsx`:
+
+```javascript
+import { readSpreadsheet, writeXlsxFile } from 'spreadsheet-utils/browser-sync';
+
+const rows = await readSpreadsheet(file);                       // File, Blob, Uint8Array or ArrayBuffer
+const bytes = writeXlsxFile(sheets, { rowBreaks: [30] }).toUint8Array(); // synchronous
+const blob = await writeXlsxFile(sheets).toBlob();
+await writeXlsxFile(sheets).toFile('report.xlsx');             // download
+```
+
+It exports `readSpreadsheet` (also the default), `readSheet`, `readXlsxFile`, `parseTabular` and `writeXlsxFile`; the read functions take the same options as in the main entry and the writer the same arguments as `spreadsheet-utils/write`. A file path or a stream is not accepted. As a script tag:
+
+```html
+<script src="dist/browser/spreadsheet-utils-sync.min.js"></script>
+<script>
+  // Exposes window.spreadsheetUtilsSync
+  const rows = await window.spreadsheetUtilsSync.readSpreadsheet(file);
 </script>
 ```
 

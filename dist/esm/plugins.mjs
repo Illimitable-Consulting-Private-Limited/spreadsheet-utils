@@ -1,6 +1,17 @@
 // src/utils/loader.js
 var fs = null;
 var iconv = null;
+var FS_MODULE = "fs";
+async function loadFs() {
+  if (fs) return;
+  try {
+    fs = await import(FS_MODULE);
+  } catch {
+    fs = { existsSync: () => false, readFileSync: () => {
+      throw new Error("File system access is not available");
+    } };
+  }
+}
 async function loadAsBuffer(input) {
   if (input instanceof Uint8Array) return input;
   if (typeof ArrayBuffer !== "undefined" && input instanceof ArrayBuffer) {
@@ -10,7 +21,7 @@ async function loadAsBuffer(input) {
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
   }
   if (typeof input === "string") {
-    if (!fs) fs = await import("fs");
+    await loadFs();
     if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
       try {
         if (fs.existsSync(input)) {
@@ -41,7 +52,7 @@ async function loadAsString(input, encoding = "utf-8") {
   const enc = (encoding || "utf-8").toLowerCase();
   if (enc === "utf-8" || enc === "utf8") {
     if (typeof input === "string") {
-      if (!fs) fs = await import("fs");
+      await loadFs();
       if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
         try {
           if (fs.existsSync(input)) {
@@ -76,7 +87,7 @@ async function detectEncoding(input) {
     const chardet = await import("chardet");
     let buffer;
     if (typeof input === "string") {
-      if (!fs) fs = await import("fs");
+      await loadFs();
       buffer = fs.readFileSync(input);
     } else if (input instanceof Uint8Array) {
       buffer = Buffer.from(input);
@@ -5041,7 +5052,7 @@ function parser(html, options) {
   return finalResult;
 }
 
-// src/parser/ods.js
+// src/parser/odsCore.js
 function parseNumberFormat(node) {
   if (!node || !node.children) return null;
   const attrs = parseAttributes(node);
@@ -5671,10 +5682,10 @@ function parseTable(tableNode, styles, numberFormats, tableStyles = {}) {
   result.minDimensions = [maxCol + 1, result.data.length];
   return result;
 }
-async function parseODS(input, options = {}) {
+async function parseODSWith(unzipArchive2, input, options = {}) {
   return parse(async (inp) => {
     const buffer = await loadAsBuffer(inp);
-    const files = await unzipArchive(buffer, {
+    const files = await unzipArchive2(buffer, {
       filter: (name) => name === "content.xml" || name === "styles.xml" || name === "settings.xml"
     });
     const contentBytes = files["content.xml"];
@@ -5926,6 +5937,11 @@ async function parseODS(input, options = {}) {
     }
     return result;
   }, input, options);
+}
+
+// src/parser/ods.js
+async function parseODS(input, options = {}) {
+  return parseODSWith(unzipArchive, input, options);
 }
 
 // src/parser/table.js

@@ -2291,7 +2291,7 @@ function unzipFromArrayBufferUsingFunction(input, options = {}, unzip3, isAsync)
   const filter = options.filter;
   const maxBytes = options.maxUncompressedSize || options.maxBytes || 256 * 1024 * 1024;
   let totalUncompressed = 0;
-  return unzip3(new Uint8Array(input), {
+  const unzipOptions = {
     // Ignore certain types of files and protect against zip bombs
     filter: (file) => {
       if (filter) {
@@ -2307,20 +2307,31 @@ function unzipFromArrayBufferUsingFunction(input, options = {}, unzip3, isAsync)
       }
       return true;
     }
-  }).then(
+  };
+  const convertError = (error) => {
+    if (isFlateError(error)) {
+      return createUnzipError(error);
+    }
+    return error;
+  };
+  const archive = new Uint8Array(input);
+  if (!isAsync) {
+    try {
+      return unzip3(archive, unzipOptions);
+    } catch (error) {
+      throw convertError(error);
+    }
+  }
+  return Promise.resolve().then(() => unzip3(archive, unzipOptions)).then(
     (result) => result,
     (error) => {
-      if (isFlateError(error)) {
-        throw createUnzipError(error);
-      } else {
-        throw error;
-      }
+      throw convertError(error);
     }
   );
 }
-function unzipAsync(archive) {
+function unzipAsync(archive, options) {
   return new Promise((resolve, reject) => {
-    unzip(archive, (error, files) => {
+    unzip(archive, options, (error, files) => {
       if (error) {
         reject(error);
       } else {
@@ -2728,6 +2739,17 @@ async function parseXLSX(input, options = {}) {
 // src/utils/loader.js
 var fs2 = null;
 var iconv = null;
+var FS_MODULE = "fs";
+async function loadFs() {
+  if (fs2) return;
+  try {
+    fs2 = await import(FS_MODULE);
+  } catch {
+    fs2 = { existsSync: () => false, readFileSync: () => {
+      throw new Error("File system access is not available");
+    } };
+  }
+}
 async function loadAsBuffer(input) {
   if (input instanceof Uint8Array) return input;
   if (typeof ArrayBuffer !== "undefined" && input instanceof ArrayBuffer) {
@@ -2737,7 +2759,7 @@ async function loadAsBuffer(input) {
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
   }
   if (typeof input === "string") {
-    if (!fs2) fs2 = await import("fs");
+    await loadFs();
     if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
       try {
         if (fs2.existsSync(input)) {
@@ -2768,7 +2790,7 @@ async function loadAsString(input, encoding = "utf-8") {
   const enc = (encoding || "utf-8").toLowerCase();
   if (enc === "utf-8" || enc === "utf8") {
     if (typeof input === "string") {
-      if (!fs2) fs2 = await import("fs");
+      await loadFs();
       if (input.length < 4096 && !input.includes("\n") && !input.includes("\r")) {
         try {
           if (fs2.existsSync(input)) {
@@ -2803,7 +2825,7 @@ async function detectEncoding(input) {
     const chardet = await import("chardet");
     let buffer;
     if (typeof input === "string") {
-      if (!fs2) fs2 = await import("fs");
+      await loadFs();
       buffer = fs2.readFileSync(input);
     } else if (input instanceof Uint8Array) {
       buffer = Buffer.from(input);
@@ -3633,6 +3655,80 @@ function applyDefaultOptions(options) {
 }
 var PARSED_OBJECT_TREE_START = {};
 
+// src/core/shapeReadResult.js
+function convertRowsToObjects(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const headers = (rows[0] || []).map((h, i) => {
+    let base = h != null ? String(h).trim() : "";
+    if (!base) base = `column${i + 1}`;
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
+    }
+    result.push(obj);
+  }
+  return result;
+}
+function shapeReadResult(tabularResult, options = {}) {
+  const worksheets = tabularResult.worksheets || [];
+  if (options.format === "tabular" || options.worksheets === true) {
+    return tabularResult;
+  }
+  const asObjects = options.asObjects === true || options.header === true;
+  if (options.allSheets === true) {
+    return worksheets.map((ws, i) => {
+      const sheetData = ws.data || [];
+      return {
+        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
+        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
+      };
+    });
+  }
+  let selectedWorksheet = worksheets[0];
+  if (options.sheet !== void 0) {
+    if (typeof options.sheet === "number") {
+      const index = options.sheet - 1;
+      if (index < 0 || index >= worksheets.length) {
+        throw new Error(`Sheet not found: ${options.sheet}`);
+      }
+      selectedWorksheet = worksheets[index];
+    } else if (typeof options.sheet === "string") {
+      const found = worksheets.find(
+        (ws) => (ws.worksheetName || ws.sheet) === options.sheet
+      );
+      if (!found) {
+        throw new Error(`Sheet not found: "${options.sheet}"`);
+      }
+      selectedWorksheet = found;
+    }
+  }
+  let data = selectedWorksheet && selectedWorksheet.data ? selectedWorksheet.data : [];
+  if (options.maxColumns && data.length > 0) {
+    data = data.map((r) => r.length > options.maxColumns ? r.slice(0, options.maxColumns) : r);
+  }
+  if (options.maxRows && data.length > options.maxRows) {
+    data = data.slice(0, options.maxRows);
+  }
+  if (typeof options.onRow === "function") {
+    data.forEach((row, i) => options.onRow(row, i));
+  }
+  if (options.schema) {
+    return parseSheetData(data, options.schema, options);
+  }
+  if (asObjects) {
+    return convertRowsToObjects(data);
+  }
+  return data;
+}
+
 // src/core/dispatcher.js
 function dispatch(ext, file, options = {}, context = {}) {
   const key = (ext || "").toLowerCase().replace(/^\./, "");
@@ -3722,78 +3818,9 @@ async function parseTabular(file, options = {}, context = {}) {
   }
   throw new Error(`Unsupported file type: ${ext || detected || fileName || "(buffer)"}`);
 }
-function convertRowsToObjects(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-  const seen = /* @__PURE__ */ new Map();
-  const headers = (rows[0] || []).map((h, i) => {
-    let base = h != null ? String(h).trim() : "";
-    if (!base) base = `column${i + 1}`;
-    const count = seen.get(base) || 0;
-    seen.set(base, count + 1);
-    return count > 0 ? `${base}_${count + 1}` : base;
-  });
-  const result = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const obj = {};
-    for (let c = 0; c < headers.length; c++) {
-      obj[headers[c]] = row[c] !== void 0 ? row[c] : null;
-    }
-    result.push(obj);
-  }
-  return result;
-}
 async function readSpreadsheet(file, options = {}, context = {}) {
   const tabularResult = await parseTabular(file, options, context);
-  const worksheets = tabularResult.worksheets || [];
-  if (options.format === "tabular" || options.worksheets === true) {
-    return tabularResult;
-  }
-  const asObjects = options.asObjects === true || options.header === true;
-  if (options.allSheets === true) {
-    return worksheets.map((ws, i) => {
-      const sheetData = ws.data || [];
-      return {
-        name: ws.worksheetName || ws.sheet || `Sheet${i + 1}`,
-        data: asObjects ? convertRowsToObjects(sheetData) : sheetData
-      };
-    });
-  }
-  let selectedWorksheet = worksheets[0];
-  if (options.sheet !== void 0) {
-    if (typeof options.sheet === "number") {
-      const index = options.sheet - 1;
-      if (index < 0 || index >= worksheets.length) {
-        throw new Error(`Sheet not found: ${options.sheet}`);
-      }
-      selectedWorksheet = worksheets[index];
-    } else if (typeof options.sheet === "string") {
-      const found = worksheets.find(
-        (ws) => (ws.worksheetName || ws.sheet) === options.sheet
-      );
-      if (!found) {
-        throw new Error(`Sheet not found: "${options.sheet}"`);
-      }
-      selectedWorksheet = found;
-    }
-  }
-  let data = selectedWorksheet && selectedWorksheet.data ? selectedWorksheet.data : [];
-  if (options.maxColumns && data.length > 0) {
-    data = data.map((r) => r.length > options.maxColumns ? r.slice(0, options.maxColumns) : r);
-  }
-  if (options.maxRows && data.length > options.maxRows) {
-    data = data.slice(0, options.maxRows);
-  }
-  if (typeof options.onRow === "function") {
-    data.forEach((row, i) => options.onRow(row, i));
-  }
-  if (options.schema) {
-    return parseSheetData(data, options.schema, options);
-  }
-  if (asObjects) {
-    return convertRowsToObjects(data);
-  }
-  return data;
+  return shapeReadResult(tabularResult, options);
 }
 
 // src/parser/csv.js
@@ -8488,7 +8515,7 @@ function parser(html, options) {
   return finalResult;
 }
 
-// src/parser/ods.js
+// src/parser/odsCore.js
 function parseNumberFormat(node) {
   if (!node || !node.children) return null;
   const attrs = parseAttributes(node);
@@ -9118,10 +9145,10 @@ function parseTable(tableNode, styles, numberFormats, tableStyles = {}) {
   result.minDimensions = [maxCol + 1, result.data.length];
   return result;
 }
-async function parseODS(input, options = {}) {
+async function parseODSWith(unzipArchive2, input, options = {}) {
   return parse(async (inp) => {
     const buffer = await loadAsBuffer(inp);
-    const files = await unzipArchive(buffer, {
+    const files = await unzipArchive2(buffer, {
       filter: (name) => name === "content.xml" || name === "styles.xml" || name === "settings.xml"
     });
     const contentBytes = files["content.xml"];
@@ -9373,6 +9400,11 @@ async function parseODS(input, options = {}) {
     }
     return result;
   }, input, options);
+}
+
+// src/parser/ods.js
+async function parseODS(input, options = {}) {
+  return parseODSWith(unzipArchive, input, options);
 }
 
 // src/parser/table.js

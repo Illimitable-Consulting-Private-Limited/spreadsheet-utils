@@ -49,6 +49,20 @@ async function build() {
         sourcemap: true
     });
 
+    // 1b. ESM build of the no-Worker browser entry. Platform "browser" so that `fflate` resolves to its browser
+    // build when the consumer bundles it; `fflate` stays external. Nothing in it starts a Worker.
+    await esbuild.build({
+        entryPoints: [{ in: 'src/browser-sync.js', out: 'browser-sync' }],
+        outdir: 'dist/esm',
+        outExtension: { '.js': '.mjs' },
+        format: 'esm',
+        platform: 'browser',
+        target: 'es2020',
+        bundle: true,
+        packages: 'external',
+        sourcemap: true
+    });
+
     // 2. CommonJS Builds (Node require)
     console.log('2. Generating CommonJS builds (dist/cjs/)...');
     await esbuild.build({
@@ -91,6 +105,11 @@ async function build() {
             in: 'src/full-browser.js',
             out: 'dist/browser/spreadsheet-utils-full.min.js',
             globalName: 'spreadsheetUtilsFull'
+        },
+        {
+            in: 'src/browser-sync.js',
+            out: 'dist/browser/spreadsheet-utils-sync.min.js',
+            globalName: 'spreadsheetUtilsSync'
         }
     ];
 
@@ -128,9 +147,9 @@ async function build() {
     }
 
     console.log('\nBuild completed successfully! Artifacts generated in dist/:');
-    console.log('  dist/esm/:     index.mjs, plugins.mjs, write.mjs, full.mjs, worker.mjs');
+    console.log('  dist/esm/:     index.mjs, plugins.mjs, write.mjs, full.mjs, worker.mjs, browser-sync.mjs');
     console.log('  dist/cjs/:     index.cjs, plugins.cjs, write.cjs, full.cjs, worker.cjs');
-    console.log('  dist/browser/: spreadsheet-utils.min.js, spreadsheet-utils-plugins.min.js, spreadsheet-utils-write.min.js, spreadsheet-utils-full.min.js');
+    console.log('  dist/browser/: spreadsheet-utils.min.js, spreadsheet-utils-plugins.min.js, spreadsheet-utils-write.min.js, spreadsheet-utils-full.min.js, spreadsheet-utils-sync.min.js');
 }
 
 build().catch((err) => {

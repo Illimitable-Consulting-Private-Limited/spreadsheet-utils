@@ -314,7 +314,8 @@ describe('Pre-Release Enhancements (All 6 Features)', () => {
 
         it('should display version with --version', async () => {
             const { stdout } = await execFileAsync('node', [cliPath, '--version']);
-            expect(stdout).to.include('spreadsheet-utils v1.0.0');
+            const { version } = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
+            expect(stdout).to.include('spreadsheet-utils v' + version);
         });
 
         it('should inspect file with info command', async () => {

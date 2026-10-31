@@ -1,6 +1,7 @@
 import conditionalFormatting from './features/conditionalFormatting.js';
 import images from './features/images.js';
 import stickyRowsOrColumns from './features/stickyRowsOrColumns.js';
+import rowBreaks from './features/rowBreaks.js';
 export default function getFeatures(customFeatures) {
   var features = [];
 
@@ -12,6 +13,9 @@ export default function getFeatures(customFeatures) {
 
   // Add "sticky rows or columns" feature implicitly.
   features.push(stickyRowsOrColumns);
+
+  // Add "row breaks" feature implicitly (local addition, see UPSTREAM.md).
+  features.push(rowBreaks);
 
   // Custom features might depend on "default" features
   // so the order of inclusion of custom features is after including "default" features.

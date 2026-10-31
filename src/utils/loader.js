@@ -6,6 +6,19 @@
 let fs = null; // Cache fs module for Node.js
 let iconv = null; // Cache iconv-lite module for extended encoding support
 
+// `fs` exists in Node only. The specifier is not a literal so that a bundler targeting the browser (and the
+// `spreadsheet-utils/browser-sync` entry in particular) doesn't try to resolve it; where `fs` can't be loaded, a
+// stand-in answers "no such file", which is what makes a string input count as raw text.
+const FS_MODULE = 'fs';
+async function loadFs() {
+    if (fs) return;
+    try {
+        fs = await import(FS_MODULE);
+    } catch {
+        fs = { existsSync: () => false, readFileSync: () => { throw new Error('File system access is not available'); } };
+    }
+}
+
 /**
  * Load file as buffer (Uint8Array) - Direct, no intermediate steps
  */
@@ -25,7 +38,7 @@ export async function loadAsBuffer(input) {
 
     // File path (Node.js) or raw string content
     if (typeof input === 'string') {
-        if (!fs) fs = await import('fs');
+        await loadFs();
         if (input.length < 4096 && !input.includes('\n') && !input.includes('\r')) {
             try {
                 if (fs.existsSync(input)) {
@@ -69,7 +82,7 @@ export async function loadAsString(input, encoding = 'utf-8') {
     // Fast paths for UTF-8
     if (enc === 'utf-8' || enc === 'utf8') {
         if (typeof input === 'string') {
-            if (!fs) fs = await import('fs');
+            await loadFs();
             if (input.length < 4096 && !input.includes('\n') && !input.includes('\r')) {
                 try {
                     if (fs.existsSync(input)) {
@@ -123,7 +136,7 @@ export async function detectEncoding(input) {
         let buffer;
         if (typeof input === 'string') {
             // File path - read file
-            if (!fs) fs = await import('fs');
+            await loadFs();
             buffer = fs.readFileSync(input);
         } else if (input instanceof Uint8Array) {
             buffer = Buffer.from(input);

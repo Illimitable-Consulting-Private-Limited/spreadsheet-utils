@@ -74,6 +74,11 @@ export interface WriteSheetOptions {
     isRowDeleted?: (row: any, index: number) => boolean;
     deletedRows?: number[];
     features?: Record<string, any>;
+    /**
+     * xlsx only. 1-based row numbers a manual page break follows (`[10, 20]` starts a page at rows 11 and 21), written
+     * as `<rowBreaks>`; sorted and de-duplicated. A value that is not a positive integer throws.
+     */
+    rowBreaks?: number[];
     [key: string]: any;
 }
 
@@ -90,6 +95,8 @@ export interface SheetSpec {
     sheet: string;
     data: WriteGrid;
     columns?: WriteColumn[];
+    /** See `WriteSheetOptions.rowBreaks`. */
+    rowBreaks?: number[];
     [key: string]: any;
 }
 

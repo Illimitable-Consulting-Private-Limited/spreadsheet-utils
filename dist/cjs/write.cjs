@@ -90,9 +90,9 @@ function getAdditionalContent(fileName, features, sheetOptions, properties) {
   var content = "";
   for (var _iterator = _createForOfIteratorHelperLoose(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.insert) {
-      var insertedContent = transform4.insert(sheetOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.insert) {
+      var insertedContent = transform5.insert(sheetOptions, properties);
       if (insertedContent) {
         content += insertedContent;
       }
@@ -129,9 +129,9 @@ function _arrayLikeToArray2(r, a) {
 function transformContent(content, fileName, features, sheetOptions, properties) {
   for (var _iterator = _createForOfIteratorHelperLoose2(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.transform) {
-      content = transform4.transform(content, sheetOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.transform) {
+      content = transform5.transform(content, sheetOptions, properties);
     }
   }
   return content;
@@ -237,9 +237,9 @@ function _arrayLikeToArray3(r, a) {
 function getElementXml(fileName, tagName, attributes, innerXml, index, properties, sheetOptionsOrSheetsOptions, features) {
   for (var _iterator = _createForOfIteratorHelperLoose3(features), _step; !(_step = _iterator()).done; ) {
     var feature = _step.value;
-    var transform4 = feature.files && feature.files.transform && feature.files.transform[fileName];
-    if (transform4 && transform4.transformElementAttributes) {
-      attributes = transform4.transformElementAttributes(tagName, attributes || NO_ATTRIBUTES, index, sheetOptionsOrSheetsOptions, properties);
+    var transform5 = feature.files && feature.files.transform && feature.files.transform[fileName];
+    if (transform5 && transform5.transformElementAttributes) {
+      attributes = transform5.transformElementAttributes(tagName, attributes || NO_ATTRIBUTES, index, sheetOptionsOrSheetsOptions, properties);
     }
   }
   if (innerXml) {
@@ -2467,12 +2467,55 @@ function hasStickyRowsOrColumns(sheetOptions) {
   return Boolean(sheetOptions.stickyRowsCount) || Boolean(sheetOptions.stickyColumnsCount);
 }
 
+// src/write/xlsx/features/rowBreaks.js
+var LAST_COLUMN_INDEX = 16383;
+var rowBreaks_default = {
+  files: {
+    transform: {
+      "xl/worksheets/sheet{id}.xml": {
+        // Placed by the schema order of `<worksheet/>` children (after `<pageSetup/>` and `<headerFooter/>`,
+        // before `<drawing/>`), and `<drawing/>` is already in the XML by the time `transform()` runs.
+        transform: function transform4(xml, sheetOptions) {
+          var rows = normalizeRowBreaks(sheetOptions.rowBreaks);
+          if (rows.length === 0) {
+            return xml;
+          }
+          var breaksXml = rows.map(function(row) {
+            return '<brk id="' + row + '" max="' + LAST_COLUMN_INDEX + '" man="1"/>';
+          }).join("");
+          var elementXml = '<rowBreaks count="' + rows.length + '" manualBreakCount="' + rows.length + '">' + breaksXml + "</rowBreaks>";
+          return insertElementMarkupAccordingToOrderOfSiblings(xml, elementXml, getOrderOfSiblings("xl/worksheets/sheet{id}.xml", "worksheet"), "worksheet");
+        }
+      }
+    }
+  }
+};
+function normalizeRowBreaks(rowBreaks) {
+  if (rowBreaks === void 0 || rowBreaks === null) {
+    return [];
+  }
+  if (!Array.isArray(rowBreaks)) {
+    throw new Error("`rowBreaks` must be an array of 1-based row numbers");
+  }
+  rowBreaks.forEach(function(row) {
+    if (typeof row !== "number" || !Number.isInteger(row) || row < 1) {
+      throw new Error("`rowBreaks` must hold positive integers (1-based row numbers), got: " + String(row));
+    }
+  });
+  return rowBreaks.filter(function(row, i) {
+    return rowBreaks.indexOf(row) === i;
+  }).sort(function(a, b) {
+    return a - b;
+  });
+}
+
 // src/write/xlsx/getFeatures.js
 function getFeatures(customFeatures) {
   var features = [];
   features.push(conditionalFormatting_default);
   features.push(images_default);
   features.push(stickyRowsOrColumns_default);
+  features.push(rowBreaks_default);
   if (customFeatures) {
     customFeatures.forEach(validateFeature);
     features = features.concat(customFeatures);
@@ -5442,9 +5485,9 @@ var JSONLTransformStream = class extends import_node_stream3.Transform {
     }
   }
 };
-function runPipeline(readable, transform4, writable) {
+function runPipeline(readable, transform5, writable) {
   return new Promise((resolve, reject) => {
-    (0, import_node_stream3.pipeline)(readable, transform4, writable, (err) => {
+    (0, import_node_stream3.pipeline)(readable, transform5, writable, (err) => {
       if (err) reject(err);
       else resolve();
     });
@@ -5452,10 +5495,10 @@ function runPipeline(readable, transform4, writable) {
 }
 async function streamCSV(source, destination, options = {}) {
   const readable = source instanceof import_node_stream3.Readable ? source : import_node_stream3.Readable.from(source);
-  const transform4 = new CSVTransformStream(options);
+  const transform5 = new CSVTransformStream(options);
   const isPath = typeof destination === "string";
   const writable = isPath ? import_node_fs6.default.createWriteStream(destination, { encoding: "utf-8" }) : destination;
-  await runPipeline(readable, transform4, writable);
+  await runPipeline(readable, transform5, writable);
   return isPath ? destination : writable;
 }
 async function streamTSV(source, destination, options = {}) {
@@ -5463,10 +5506,10 @@ async function streamTSV(source, destination, options = {}) {
 }
 async function streamJSONL(source, destination, options = {}) {
   const readable = source instanceof import_node_stream3.Readable ? source : import_node_stream3.Readable.from(source);
-  const transform4 = new JSONLTransformStream(options);
+  const transform5 = new JSONLTransformStream(options);
   const isPath = typeof destination === "string";
   const writable = isPath ? import_node_fs6.default.createWriteStream(destination, { encoding: "utf-8" }) : destination;
-  await runPipeline(readable, transform4, writable);
+  await runPipeline(readable, transform5, writable);
   return isPath ? destination : writable;
 }
 

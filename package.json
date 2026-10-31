@@ -1,6 +1,6 @@
 {
   "name": "spreadsheet-utils",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ultra-lightweight, low-memory universal spreadsheet toolkit merging read-excel-file streaming SAX reader with TabularJS multi-format plugins and styled write-excel-file writer. Supports 16+ formats (XLSX, XLS, ODS, CSV, TSV, DBF, DIF, Lotus 1-2-3, SLK, HTML tables, XML Spreadsheet, Apple Numbers) in Node.js and Browser.",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
@@ -49,6 +49,11 @@
       "require": "./dist/cjs/worker.cjs",
       "default": "./dist/esm/worker.mjs"
     },
+    "./browser-sync": {
+      "types": "./browser-sync.d.ts",
+      "import": "./dist/esm/browser-sync.mjs",
+      "default": "./dist/esm/browser-sync.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -59,6 +64,7 @@
     "write.d.ts",
     "full.d.ts",
     "worker.d.ts",
+    "browser-sync.d.ts",
     "README.md",
     "UPSTREAM.md",
     "LICENSE"
