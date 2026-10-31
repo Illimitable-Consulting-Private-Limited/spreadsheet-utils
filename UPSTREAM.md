@@ -79,6 +79,7 @@ When merging upstream updates, ensure these core principles are preserved:
 | :--- | :--- |
 | `src/write/xlsx/features/rowBreaks.js` | **New.** The `rowBreaks` sheet option (v1.1.0): a feature transform like `stickyRowsOrColumns.js` that inserts `<rowBreaks count manualBreakCount><brk id max="16383" man="1"/></rowBreaks>` by the sheet schema order (after `<pageSetup/>`/`<headerFooter/>`, before `<drawing/>`). Sorts, de-duplicates and validates (positive integers; otherwise throws). |
 | `src/write/xlsx/getFeatures.js` | **Edited.** Imports `rowBreaks` and pushes it after `stickyRowsOrColumns`. |
+| `src/write/dbf.js` | **Local file** (not in write-excel-file). v1.2.0 legacy-layout options of `createDBF`/`writeDBF`, all additive: `numberText: 'raw'` (N/F as `String(value)` cut to size, no rounding or `*`), `headerNullByte` (0x00 after 0x0D, header length + 1), `workAreaId` (descriptor byte 0x14, 0-255) and `strictEncoding` (latin1/ascii: throws naming field and record on an unencodable written character). |
 
 ### `src/zip` (read-excel-file @ 5.8.6)
 

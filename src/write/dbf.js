@@ -477,9 +477,25 @@ export function normalizeSchemaToDbfFields(schema, data = [], options = {}) {
 }
 
 /**
+ * strictEncoding: throw when a character that will be written (the first `size` of them) is outside the
+ * one-byte encoding.
+ */
+function assertEncodable(str, field, opts) {
+    const limit = Math.min(str.length, field.size);
+    for (let i = 0; i < limit; i++) {
+        if (str.charCodeAt(i) > opts.maxCharCode) {
+            throw new Error(
+                `DBF field ${field.name}, record ${opts.record}: character ${JSON.stringify(str[i])} `
+                + `(U+${str.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0')}) cannot be written in ${opts.encoding}.`
+            );
+        }
+    }
+}
+
+/**
  * Format and write a single field's value into the binary record buffer.
  */
-function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
+function writeFieldValue(buffer, view, offset, rawVal, field, encoding, opts = {}) {
     let val = rawVal;
     if (val && typeof val === 'object' && 'value' in val && !(val instanceof Date)) {
         val = val.value;
@@ -490,6 +506,9 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
             if (val === null || val === undefined) {
                 buffer.fill(0x20, offset, offset + field.size);
             } else {
+                if (opts.maxCharCode !== undefined) {
+                    assertEncodable(String(val), field, opts);
+                }
                 const bytes = encodeString(String(val), encoding);
                 const copyLen = Math.min(bytes.length, field.size);
                 buffer.set(bytes.subarray(0, copyLen), offset);
@@ -502,7 +521,18 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
 
         case 'N':
         case 'F': {
-            if (val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
+            if (opts.numberText === 'raw') {
+                // Legacy text: String(value) cut to the field size, no rounding and no * fill.
+                const rawNum = (val === null || val === undefined) ? NaN : Number(val);
+                if (!Number.isFinite(rawNum)) {
+                    buffer.fill(0x20, offset, offset + field.size);
+                } else {
+                    const padded = String(rawNum).slice(0, field.size).padStart(field.size, ' ');
+                    for (let i = 0; i < field.size; i++) {
+                        buffer[offset + i] = padded.charCodeAt(i);
+                    }
+                }
+            } else if (val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
                 buffer.fill(0x20, offset, offset + field.size);
             } else {
                 const num = Number(val);
@@ -620,6 +650,9 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
         default: {
             // Fallback for unknown type: write as string
             const strVal = (val === null || val === undefined) ? '' : String(val);
+            if (opts.maxCharCode !== undefined) {
+                assertEncodable(strVal, field, opts);
+            }
             const bytes = encodeString(strVal, encoding);
             const copyLen = Math.min(bytes.length, field.size);
             buffer.set(bytes.subarray(0, copyLen), offset);
@@ -643,6 +676,11 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
  * @param {string} [options.encoding='utf-8'] - Character encoding ('utf-8', 'latin1', 'ascii')
  * @param {Date} [options.lastUpdate] - Custom last update date in header
  * @param {number} [options.languageDriver] - DBF language driver ID byte
+ * @param {'fixed'|'raw'} [options.numberText='fixed'] - N/F text: 'fixed' rounds to the decimal places and fills
+ *   overflow with `*`; 'raw' writes String(value) cut to the field size
+ * @param {boolean} [options.headerNullByte=false] - write 0x00 after the 0x0D terminator (header length + 1)
+ * @param {number} [options.workAreaId=0] - 0-255, byte 0x14 of each field descriptor
+ * @param {boolean} [options.strictEncoding=false] - with latin1/ascii, throw on a written character outside the encoding
  * @param {Function} [options.isRowDeleted] - Predicate returning true if row is marked deleted
  * @param {number[]} [options.deletedRows] - Indices of rows to mark deleted
  * @returns {Uint8Array}
@@ -668,7 +706,25 @@ export function createDBF(data, options = {}) {
         ? options.fileVersion
         : (options.fileVersion === 'Visual FoxPro' ? 0x30 : 0x03);
 
-    const headerLength = 32 + (fields.length * 32) + 1;
+    const numberText = options.numberText === undefined ? 'fixed' : options.numberText;
+    if (numberText !== 'fixed' && numberText !== 'raw') {
+        throw new Error(`Invalid DBF option numberText: ${JSON.stringify(options.numberText)} (expected 'fixed' or 'raw').`);
+    }
+    const workAreaId = options.workAreaId === undefined ? 0 : options.workAreaId;
+    if (!Number.isInteger(workAreaId) || workAreaId < 0 || workAreaId > 255) {
+        throw new Error(`Invalid DBF option workAreaId: ${JSON.stringify(options.workAreaId)} (expected an integer 0-255).`);
+    }
+    const nullByte = options.headerNullByte ? 1 : 0;
+
+    let maxCharCode;
+    if (options.strictEncoding) {
+        const enc = String(encoding).toLowerCase().replace('-', '');
+        if (enc === 'latin1' || enc === 'iso88591') maxCharCode = 0xFF;
+        else if (enc === 'ascii') maxCharCode = 0x7F;
+    }
+    const writeOpts = { numberText, maxCharCode, encoding, record: 0 };
+
+    const headerLength = 32 + (fields.length * 32) + 1 + nullByte;
     const recordLength = 1 + fields.reduce((sum, f) => sum + f.size, 0);
     const totalLength = headerLength + (rows.length * recordLength) + 1;
 
@@ -710,6 +766,7 @@ export function createDBF(data, options = {}) {
         // Length and decimal places
         buffer[fieldOffset + 16] = field.size & 0xFF;
         buffer[fieldOffset + 17] = (field.decimalPlaces || 0) & 0xFF;
+        buffer[fieldOffset + 20] = workAreaId;
     }
 
     // Header terminator
@@ -732,7 +789,8 @@ export function createDBF(data, options = {}) {
         for (let f = 0; f < fields.length; f++) {
             const field = fields[f];
             const rawVal = field.value(row, r);
-            writeFieldValue(buffer, view, colOffset, rawVal, field, encoding);
+            writeOpts.record = r;
+            writeFieldValue(buffer, view, colOffset, rawVal, field, encoding, writeOpts);
             colOffset += field.size;
         }
 

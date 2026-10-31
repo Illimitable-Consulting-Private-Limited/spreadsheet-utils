@@ -70,6 +70,14 @@ export interface WriteSheetOptions {
     encoding?: string;
     lastUpdate?: Date;
     languageDriver?: number;
+    /** dbf only. `'fixed'` (default) rounds N/F to the decimal places and fills overflow with `*`; `'raw'` writes `String(value)` cut to the field size, blank when not finite. Anything else throws. */
+    numberText?: 'fixed' | 'raw';
+    /** dbf only. Write 0x00 after the 0x0D header terminator and count it in the header length (legacy dBASE/FoxPro layout). */
+    headerNullByte?: boolean;
+    /** dbf only. Integer 0-255 written to byte 0x14 (work area id) of every field descriptor; default 0. Anything else throws. */
+    workAreaId?: number;
+    /** dbf only. With `latin1`/`iso-8859-1` (> 0xFF) or `ascii` (> 0x7F), a C value whose written characters include one outside the encoding throws, naming the field and the 0-based record. No effect for utf-8. */
+    strictEncoding?: boolean;
     fieldDescriptors?: DbfFieldDescriptor[];
     isRowDeleted?: (row: any, index: number) => boolean;
     deletedRows?: number[];

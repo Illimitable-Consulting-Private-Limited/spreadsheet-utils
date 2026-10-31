@@ -3580,7 +3580,17 @@ function normalizeSchemaToDbfFields(schema, data = [], options = {}) {
     };
   });
 }
-function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
+function assertEncodable(str, field, opts) {
+  const limit = Math.min(str.length, field.size);
+  for (let i = 0; i < limit; i++) {
+    if (str.charCodeAt(i) > opts.maxCharCode) {
+      throw new Error(
+        `DBF field ${field.name}, record ${opts.record}: character ${JSON.stringify(str[i])} (U+${str.charCodeAt(i).toString(16).toUpperCase().padStart(4, "0")}) cannot be written in ${opts.encoding}.`
+      );
+    }
+  }
+}
+function writeFieldValue(buffer, view, offset, rawVal, field, encoding, opts = {}) {
   let val = rawVal;
   if (val && typeof val === "object" && "value" in val && !(val instanceof Date)) {
     val = val.value;
@@ -3590,6 +3600,9 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
       if (val === null || val === void 0) {
         buffer.fill(32, offset, offset + field.size);
       } else {
+        if (opts.maxCharCode !== void 0) {
+          assertEncodable(String(val), field, opts);
+        }
         const bytes = encodeString(String(val), encoding);
         const copyLen = Math.min(bytes.length, field.size);
         buffer.set(bytes.subarray(0, copyLen), offset);
@@ -3601,7 +3614,17 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
     }
     case "N":
     case "F": {
-      if (val === null || val === void 0 || typeof val === "number" && isNaN(val)) {
+      if (opts.numberText === "raw") {
+        const rawNum = val === null || val === void 0 ? NaN : Number(val);
+        if (!Number.isFinite(rawNum)) {
+          buffer.fill(32, offset, offset + field.size);
+        } else {
+          const padded = String(rawNum).slice(0, field.size).padStart(field.size, " ");
+          for (let i = 0; i < field.size; i++) {
+            buffer[offset + i] = padded.charCodeAt(i);
+          }
+        }
+      } else if (val === null || val === void 0 || typeof val === "number" && isNaN(val)) {
         buffer.fill(32, offset, offset + field.size);
       } else {
         const num = Number(val);
@@ -3707,6 +3730,9 @@ function writeFieldValue(buffer, view, offset, rawVal, field, encoding) {
     }
     default: {
       const strVal = val === null || val === void 0 ? "" : String(val);
+      if (opts.maxCharCode !== void 0) {
+        assertEncodable(strVal, field, opts);
+      }
       const bytes = encodeString(strVal, encoding);
       const copyLen = Math.min(bytes.length, field.size);
       buffer.set(bytes.subarray(0, copyLen), offset);
@@ -3732,7 +3758,23 @@ function createDBF(data, options = {}) {
   }
   const encoding = options.encoding || "utf-8";
   const fileVersion = typeof options.fileVersion === "number" ? options.fileVersion : options.fileVersion === "Visual FoxPro" ? 48 : 3;
-  const headerLength = 32 + fields.length * 32 + 1;
+  const numberText = options.numberText === void 0 ? "fixed" : options.numberText;
+  if (numberText !== "fixed" && numberText !== "raw") {
+    throw new Error(`Invalid DBF option numberText: ${JSON.stringify(options.numberText)} (expected 'fixed' or 'raw').`);
+  }
+  const workAreaId = options.workAreaId === void 0 ? 0 : options.workAreaId;
+  if (!Number.isInteger(workAreaId) || workAreaId < 0 || workAreaId > 255) {
+    throw new Error(`Invalid DBF option workAreaId: ${JSON.stringify(options.workAreaId)} (expected an integer 0-255).`);
+  }
+  const nullByte = options.headerNullByte ? 1 : 0;
+  let maxCharCode;
+  if (options.strictEncoding) {
+    const enc = String(encoding).toLowerCase().replace("-", "");
+    if (enc === "latin1" || enc === "iso88591") maxCharCode = 255;
+    else if (enc === "ascii") maxCharCode = 127;
+  }
+  const writeOpts = { numberText, maxCharCode, encoding, record: 0 };
+  const headerLength = 32 + fields.length * 32 + 1 + nullByte;
   const recordLength = 1 + fields.reduce((sum, f) => sum + f.size, 0);
   const totalLength = headerLength + rows.length * recordLength + 1;
   const buffer = new Uint8Array(totalLength);
@@ -3758,6 +3800,7 @@ function createDBF(data, options = {}) {
     buffer[fieldOffset + 11] = field.type.charCodeAt(0);
     buffer[fieldOffset + 16] = field.size & 255;
     buffer[fieldOffset + 17] = (field.decimalPlaces || 0) & 255;
+    buffer[fieldOffset + 20] = workAreaId;
   }
   buffer[32 + fields.length * 32] = 13;
   let recOffset = headerLength;
@@ -3770,7 +3813,8 @@ function createDBF(data, options = {}) {
     for (let f = 0; f < fields.length; f++) {
       const field = fields[f];
       const rawVal = field.value(row, r);
-      writeFieldValue(buffer, view, colOffset, rawVal, field, encoding);
+      writeOpts.record = r;
+      writeFieldValue(buffer, view, colOffset, rawVal, field, encoding, writeOpts);
       colOffset += field.size;
     }
     recOffset += recordLength;

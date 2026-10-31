@@ -693,7 +693,12 @@ await writeDBF(books, { fieldDescriptors, filePath: 'books.dbf', fileVersion: 0x
 | `fieldDescriptors` | `Array` | `undefined` | yortus/`DBFFile` style field descriptor array (`[{ name, type, size, decimalPlaces }]`) |
 | `fileVersion` | `number` | `0x03` | `0x03` (dBASE III), `0x30` (Visual FoxPro) |
 | `encoding` | `string` | `'utf-8'` | Character encoding: `'utf-8'`, `'latin1'` / `'iso-8859-1'`, `'ascii'` |
+| `languageDriver` | `number` | `0x03` for latin1, else `0x00` | Language driver ID, header byte 29 |
 | `lastUpdate` | `Date` | `new Date()` | Custom last-update date in the DBF header |
+| `numberText` | `'fixed' \| 'raw'` | `'fixed'` | N/F text. `'fixed'` rounds to the decimal places and fills overflow with `*`. `'raw'` writes `String(value)` cut to the field size (no rounding, no `*`), spaces when not finite. Other values throw |
+| `headerNullByte` | `boolean` | `false` | Write `0x00` after the `0x0D` header terminator and count it in the header length (legacy dBASE/FoxPro layout) |
+| `workAreaId` | `number` | `0` | Integer 0-255 written to byte `0x14` of every field descriptor. Other values throw |
+| `strictEncoding` | `boolean` | `false` | With `latin1` or `ascii`, throw (`DBF field NAME, record N: ...`, record 0-based) when a character that would be written is outside the encoding. No effect for `utf-8` |
 | `deletedRows` | `number[]` | `undefined` | Array of row indices to mark as deleted (`0x2A` flag) |
 | `isRowDeleted` | `Function` | `undefined` | Predicate `(row, index) => boolean` to mark records deleted |
 | `filePath` | `string` | `undefined` | Output file path (Node.js) |
