@@ -11,6 +11,7 @@ import { createUnzipError } from './UnzipError.js'
 /**
  * Reads `*.zip` file contents. Ignores anything besides `.xml` or `.xml.rels` files.
  * @param  {ArrayBuffer} input
+ * @param  {object} [options] — `filter({ path })` and `maxUncompressedSize`.
  * @return {Promise<Record<string,Uint8Array>>} Resolves to an object holding `*.zip` file entries.
  */
 export default function unzipFromArrayBuffer(input, options) {
@@ -18,20 +19,21 @@ export default function unzipFromArrayBuffer(input, options) {
 }
 
 /**
- * Reads `*.zip` file contents. Ignores anything besides `.xml` or `.xml.rels` files.
+ * Same, with the `unzip` function to use.
  * @param  {ArrayBuffer} input
- * @param  {(ArrayBuffer) => Record<string, Uint8Array> | Promise<Record<string, Uint8Array>>} unzip
- * @param  {boolean} isAsync — Should be `true` when `unzip()` returns a `Promise`, `false` otherwise.
- * @return {Promise<Record<string,Uint8Array>> | Record<string,Uint8Array>} Resolves to an object holding `*.zip` file entries.
+ * @param  {object} [options]
+ * @param  {({ path: string }) => boolean} [options.filter] — Which entries to read.
+ * @param  {number} [options.maxUncompressedSize] — Total uncompressed size limit (zip bomb guard).
+ * @param  {(Uint8Array, object) => Record<string, Uint8Array> | Promise<Record<string, Uint8Array>>} unzip — Called with the archive and `fflate`'s options (`{ filter }`).
+ * @param  {boolean} isAsync — Should be `true` when `unzip()` returns a `Promise`, `false` when it returns the files.
+ * @return {Promise<Record<string,Uint8Array>> | Record<string,Uint8Array>} The entries of the `*.zip` file (a Promise of them when `isAsync`).
  */
 export function unzipFromArrayBufferUsingFunction(input, options = {}, unzip, isAsync) {
 	const filter = options.filter;
 	const maxBytes = options.maxUncompressedSize || options.maxBytes || (256 * 1024 * 1024);
 	let totalUncompressed = 0;
 
-	// Read the `.zip` archive.
-	// `result` is either `object` or `Promise<object>`
-	return unzip(new Uint8Array(input), {
+	const unzipOptions = {
 		// Ignore certain types of files and protect against zip bombs
 		filter: (file) => {
 			if (filter) {
@@ -47,25 +49,41 @@ export function unzipFromArrayBufferUsingFunction(input, options = {}, unzip, is
 			}
 			return true;
 		}
-	}).then(
+	}
+
+	// If `fflate` throws its specific error then it implies that the `.zip` file is not valid.
+	const convertError = (error) => {
+		if (isFlateError(error)) {
+			return createUnzipError(error)
+		}
+		return error
+	}
+
+	const archive = new Uint8Array(input)
+
+	if (!isAsync) {
+		try {
+			return unzip(archive, unzipOptions)
+		} catch (error) {
+			throw convertError(error)
+		}
+	}
+
+	// `unzip()` throws synchronously too (the `filter` runs before it returns), so it is called inside `Promise.resolve().then()`.
+	return Promise.resolve().then(() => unzip(archive, unzipOptions)).then(
 		result => result,
 		(error) => {
-			// If `fflate` throws its specific error then it implies that the `.zip` file is not valid.
-			if (isFlateError(error)) {
-				throw createUnzipError(error)
-			} else {
-				throw error
-			}
+			throw convertError(error)
 		}
 	)
 }
 
-function unzipAsync(archive) {
+function unzipAsync(archive, options) {
   return new Promise((resolve, reject) => {
 		// `unzip()` will resort to "synchronous" decompression in two edge cases:
     // * When the archive size is less than `512KB`.
     // * When the data is barely compressed, i.e. the compression ratio is less than 20% reduction in size.
-    unzip(archive, (error, files) => {
+    unzip(archive, options, (error, files) => {
       if (error) {
         reject(error)
       } else {

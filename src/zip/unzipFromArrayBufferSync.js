@@ -20,8 +20,9 @@ import { unzipFromArrayBufferUsingFunction } from './unzipFromArrayBuffer.js'
 /**
  * Reads `*.zip` file contents. Ignores anything besides `.xml` or `.xml.rels` files.
  * @param  {ArrayBuffer} input
+ * @param  {object} [options] — `filter({ path })` and `maxUncompressedSize`.
  * @return {Record<string,Uint8Array>} An object holding `*.zip` file entries.
  */
 export default function unzipFromArrayBufferSync(input, options) {
-	return unzipFromArrayBufferUsingFunction(input, options, unzipSync, true)
+	return unzipFromArrayBufferUsingFunction(input, options, unzipSync, false)
 }
