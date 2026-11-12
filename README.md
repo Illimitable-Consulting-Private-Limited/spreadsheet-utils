@@ -706,6 +706,17 @@ await writeDBF(books, { fieldDescriptors, filePath: 'books.dbf', fileVersion: 0x
 | `blob` | `boolean` | `false` | Return browser `Blob` |
 | `fileName` | `string` | `undefined` | File name for browser download |
 
+#### DBF Read Options
+
+Pass to `parseDBF(input, options)` (or `readSpreadsheet` with the DBF plugin). Defaults are unchanged; the options exist for importers written against yortus/`DBFFile` 1.x (`{ encoding: 'latin1', trimText: 'end', emptyText: '', dateType: 'date' }` reads the values it gave). A bad value throws `Invalid DBF option <name>: ...`.
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `encoding` | `string` | `undefined` | `undefined` / `'utf-8'`: UTF-8 first, latin1 when the bytes are not valid UTF-8. `'latin1'` / `'iso-8859-1'`: one byte a character. Field names are unaffected |
+| `trimText` | `'both' \| 'end'` | `'both'` | C and M fields: `'both'` trims both sides, `'end'` cuts trailing spaces only. Other types parse as before |
+| `emptyText` | `null \| ''` | `null` | Value of a C / M field with nothing left after trimming. Other types stay `null` |
+| `dateType` | `'string' \| 'date'` | `'string'` | D fields: `'YYYY-MM-DD'` or a `Date` at UTC midnight (a blank or unparsable D field is `null`) |
+
 ### XLS (Excel 97–2004) File Export (`xlsPlugin`)
 
 Export spreadsheets to legacy binary Microsoft Excel format (`.xls` BIFF8 with Compound File Binary / OLE2 packaging). Supports 2D grids, schema mapping, multi-sheet workbooks, and cell styling:

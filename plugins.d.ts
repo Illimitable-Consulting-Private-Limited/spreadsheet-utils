@@ -55,7 +55,19 @@ export interface DbfFieldDescriptor {
     prop?: string;
 }
 
-export function writeDBF(data: any, options?: any): Promise<Uint8Array | Buffer | string | void>;
+export interface DbfReadOptions {
+    /** Text decoding. `undefined` (default) and `'utf-8'` try UTF-8 and fall back to latin1 when the bytes are not valid UTF-8; `'latin1'` / `'iso-8859-1'` decode one byte a character. Anything else throws. Field names are unaffected. */
+    encoding?: 'utf-8' | 'latin1' | 'iso-8859-1';
+    /** C and M fields. `'both'` (default) trims both sides; `'end'` cuts trailing spaces (0x20) only and keeps leading ones. Other field types are parsed as before. Anything else throws. */
+    trimText?: 'both' | 'end';
+    /** Value of a C / M field with nothing left after trimming: `null` (default) or `''`. Other types stay `null`. Anything else throws. */
+    emptyText?: null | '';
+    /** D fields. `'string'` (default) gives `'YYYY-MM-DD'`; `'date'` gives a `Date` at UTC midnight (a blank or unparsable D field is `null`). Anything else throws. */
+    dateType?: 'string' | 'date';
+    onload?: (result: TabularSpreadsheet) => void;
+    onerror?: (error: Error) => void;
+}
+
 export function createDBF(data: any, options?: any): Uint8Array;
 export function normalizeSchemaToDbfFields(schema?: any, data?: any, options?: any): DbfFieldDescriptor[];
 
@@ -74,7 +86,7 @@ export function parseHTMLTable(input: any, options?: any): Promise<TabularSpread
 export function parseAllHTMLTables(input: any, options?: any): Promise<TabularSpreadsheet>;
 export function parseXMLSpreadsheet(input: any, options?: any): Promise<TabularSpreadsheet>;
 export function parseXMLSpreadsheetString(fileContent: string): TabularSpreadsheet;
-export function parseDBF(input: any, options?: any): Promise<TabularSpreadsheet>;
+export function parseDBF(input: any, options?: DbfReadOptions): Promise<TabularSpreadsheet>;
 export function parseLotus(input: any, options?: any): Promise<TabularSpreadsheet>;
 export function parseDIF(input: any, options?: any): Promise<TabularSpreadsheet>;
 export function parseSLK(input: any, options?: any): Promise<TabularSpreadsheet>;
