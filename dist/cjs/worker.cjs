@@ -10459,24 +10459,59 @@ function parseFieldDescriptor(buffer, offset) {
     hasMDX: mdxFlag !== 0
   };
 }
-function decodeFieldValueBytes(bytes) {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
-  } catch {
-    return String.fromCharCode(...bytes).trim();
+function resolveReadOptions(options) {
+  options = options || {};
+  const bad = (name, value, expected) => {
+    throw new Error(`Invalid DBF option ${name}: ${JSON.stringify(value)} (expected ${expected}).`);
+  };
+  const encoding = options.encoding;
+  if (encoding !== void 0 && encoding !== "utf-8" && encoding !== "latin1" && encoding !== "iso-8859-1") {
+    bad("encoding", encoding, "'utf-8', 'latin1' or 'iso-8859-1'");
   }
+  const trimText = options.trimText === void 0 ? "both" : options.trimText;
+  if (trimText !== "both" && trimText !== "end") {
+    bad("trimText", options.trimText, "'both' or 'end'");
+  }
+  const emptyText = options.emptyText === void 0 ? null : options.emptyText;
+  if (emptyText !== null && emptyText !== "") {
+    bad("emptyText", options.emptyText, "null or ''");
+  }
+  const dateType = options.dateType === void 0 ? "string" : options.dateType;
+  if (dateType !== "string" && dateType !== "date") {
+    bad("dateType", options.dateType, "'string' or 'date'");
+  }
+  return {
+    latin1: encoding === "latin1" || encoding === "iso-8859-1",
+    trimEnd: trimText === "end",
+    emptyText,
+    dateAsDate: dateType === "date"
+  };
 }
-function parseFieldValue(buffer, offset, field) {
+function decodeFieldValueBytes(bytes, latin1) {
+  if (!latin1) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+    }
+  }
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    text += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return text;
+}
+function parseFieldValue(buffer, offset, field, opts) {
   const bytes = buffer.slice(offset, offset + field.length);
-  const rawValue = decodeFieldValueBytes(bytes);
+  const decoded = decodeFieldValueBytes(bytes, opts.latin1);
+  if (field.type === "C" || field.type === "M") {
+    const text = opts.trimEnd ? decoded.replace(/\x20+$/, "") : decoded.trim();
+    return text === "" ? opts.emptyText : text;
+  }
+  const rawValue = decoded.trim();
   if (!rawValue || rawValue === "") {
     return null;
   }
   switch (field.type) {
-    case "C":
-    // Character
-    case "M":
-      return rawValue;
     case "N":
     // Numeric
     case "F":
@@ -10499,6 +10534,12 @@ function parseFieldValue(buffer, offset, field) {
         const month = parseInt(rawValue.substring(4, 6), 10);
         const day = parseInt(rawValue.substring(6, 8), 10);
         if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+          if (opts.dateAsDate) {
+            const date = new Date(Date.UTC(2e3, 0, 1));
+            date.setUTCFullYear(year, month - 1, day);
+            const valid = date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+            return valid ? date : null;
+          }
           return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         }
       }
@@ -10546,7 +10587,8 @@ function parseFieldValue(buffer, offset, field) {
       return rawValue;
   }
 }
-function parseDBFBuffer(buffer) {
+function parseDBFBuffer(buffer, options = {}) {
+  const opts = resolveReadOptions(options);
   if (!(buffer instanceof Uint8Array)) {
     buffer = new Uint8Array(buffer);
   }
@@ -10577,7 +10619,7 @@ function parseDBFBuffer(buffer) {
     const record = [];
     for (const field of fields) {
       if (offset >= buffer.length) break;
-      const value = parseFieldValue(buffer, offset, field);
+      const value = parseFieldValue(buffer, offset, field, opts);
       record.push(value);
       offset += field.length;
     }
@@ -10653,7 +10695,7 @@ function parseDBFBuffer(buffer) {
 async function parseDBF(input, options = {}) {
   return parse(async (inp) => {
     const buffer = await loadAsBuffer(inp);
-    return parseDBFBuffer(buffer);
+    return parseDBFBuffer(buffer, options);
   }, input, options);
 }
 
